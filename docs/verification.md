@@ -61,13 +61,15 @@ Playwrightは専用4180番ポートにテスト用の静的サーバーを起動
 
 ## 未確認・未実装
 
-- iPhone/Android実機のインストール、iOS Safariの共有メニューとiCloud Driveへの保存、永続ストレージ許可、Safari固有のデータ保持/更新。
+- ホーム画面へのアプリ保存はユーザーから完了報告あり。機種・OSバージョンは未記録。オフライン起動・データ保持・共有/復元・永続ストレージ・更新、他の端末でのインストールは引き続き確認が必要。
 - ChatGPT直接認証・自動献立提案、外部レシピの自動解析、店舗ごとの売り場/通路マップ/経路最適化、クラウド同期。
 - 調理時の自動在庫消費。同じ週の複数回の買い物リスト。
 
 現在の範囲は買い物リスト1週1件・同時進行1件。完了済みリストは変更できない。実在庫の調理消費は手動更新。バックアップは10MB以下。これらはREADMEとUIで説明している。
 
-次のタスク: iOS実機でインストール→オフライン→iCloudへの手動バックアップ→復元を検証する。その後、在庫消費UXと同じ週の複数回の買い物を改善する。AI直接接続・マップ・同期は独立した後続タスク。
+次のタスク: 購入チェックの連続タップ対応を改善し、ホーム画面アプリでのオフライン・保存データ保持・バックアップ/復元・更新を実機で確認する。その後、同じ週の複数回の買い物と調理時の在庫消費を改善する。AI直接接続・マップ・同期は独立した後続タスク。
+
+残件の最新の優先度と完了条件は[backlog.md](backlog.md)を参照。今回はユーザーの保存完了報告を反映し、開発残件を整理した。アプリ機能・データ形式の変更は行っていない。
 
 ## 変更ファイル（すべて新規）
 
@@ -80,6 +82,6 @@ Playwrightは専用4180番ポートにテスト用の静的サーバーを起動
 | UI | `src/main.tsx`, `src/ui/App.tsx`, `src/ui/hooks.ts`, `src/ui/components.tsx`, `src/ui/PlanPage.tsx`, `src/ui/RecipesPage.tsx`, `src/ui/ShoppingPage.tsx`, `src/ui/PantryPage.tsx`, `src/ui/SettingsPage.tsx`, `src/ui/styles.css` |
 | PWA資産 | `public/icon.svg`, `public/icon-192.png`, `public/icon-512.png`, `public/apple-touch-icon.png`, `scripts/generate-icons.py` |
 | E2E/CI | `tests/app.spec.ts`, `tests/pages-server.mjs`, `.github/workflows/deploy.yml` |
-| 文書/ライセンス | `README.md`, `AGENTS.md`, `LICENSE`, `docs/architecture.md`, `docs/roadmap.md`, `docs/verification.md` |
+| 文書/ライセンス | `README.md`, `AGENTS.md`, `LICENSE`, `docs/architecture.md`, `docs/roadmap.md`, `docs/backlog.md`, `docs/verification.md` |
 
 node_modules、dist、テスト結果、ローカルDBや認証情報はソース配布に含めない。

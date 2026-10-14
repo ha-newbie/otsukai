@@ -128,7 +128,7 @@ docs/             アーキテクチャ・ロードマップ
 
 React、TypeScript strict、Vite、Tailwind CSS、Dexie、Zod、vite-plugin-pwaを使用。テストはVitest、fake-indexeddb、Playwrightです。ランタイム依存はReact/React DOM/Dexie/Zodに抑えています。
 
-詳しい設計は[architecture.md](docs/architecture.md)、将来の計画は[roadmap.md](docs/roadmap.md)、開発時の規約は[AGENTS.md](AGENTS.md)を参照してください。
+詳しい設計は[architecture.md](docs/architecture.md)、将来の計画は[roadmap.md](docs/roadmap.md)、優先度と完了条件を含む開発残件は[backlog.md](docs/backlog.md)、開発時の規約は[AGENTS.md](AGENTS.md)を参照してください。
 
 実行済みチェックと変更ファイルの一覧は[verification.md](docs/verification.md)を参照してください。
 
@@ -136,7 +136,7 @@ React、TypeScript strict、Vite、Tailwind CSS、Dexie、Zod、vite-plugin-pwa�
 
 ChatGPT直接認証/自動献立提案、外部レシピURLの自動解析、店舗ごとの売り場設定・通路マップ・経路最適化、クラウド同期は未実装です。Sign in with ChatGPTの公式PWA対応と安全な認証方式が確認されるまで直接認証しません。既存のChatGPT契約に通常のAPI利用枠が含まれるとは仮定せず、API課金を要求しません。認証トークンは保存しません。CORSや外部サイトの利用規約を回避しません。
 
-iPhone/Android実機でのインストール、iCloud Driveへの共有、永続ストレージ許可、Safariの保存領域の扱い、実際のGitHub Pages配信は別途確認が必要です。モバイルChromiumのE2EはiOS Safari実機の代替ではありません。
+GitHub Pagesでの配信とホーム画面へのアプリ保存（ユーザー報告）は確認済みです。実機のオフライン起動・データ保持、iCloud Driveへの共有/復元、永続ストレージ許可、Safariでの更新、他の端末でのインストールは別途確認が必要です。モバイルChromiumのE2EはiOS Safari実機の代替ではありません。
 
 ## ライセンス
 
