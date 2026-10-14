@@ -50,16 +50,24 @@ Playwrightは専用4180番ポートにテスト用の静的サーバーを起動
 
 この設定検証の時点ではGitHubへのpush・実際のActions実行・実公開は未実施。iOS Safari実機でのホーム画面追加とオフライン起動は別途確認が必要。READMEにGitHubの手動設定・初回push・更新・確認手順を記載した。
 
+## GitHub公開結果
+
+- 全42ファイルをmainに反映し、GitHub上の各ファイルのSHAとローカルの内容を照合した。
+- アプリ公開コミット: `60830deb90f4af1b46bd5d06034682724b5082a9`。
+- [初回公開のActions](https://github.com/ha-newbie/otsukai/actions/runs/38647924000)のbuild・deployがともに成功。GitHub上でもnpm ci、型チェック、単体テスト、production build、7件の画面テスト、Pages公開が成功した。
+- https://ha-newbie.github.io/otsukai/ のHTTP 200を確認。JavaScript・CSS・manifest・Service Worker・3種のPNGアイコンを公開先から正常に取得できることを確認した。
+- 直接URLの404.htmlが同じ起動HTMLを返すことと、manifestのid/start_url/scopeが`/otsukai/`であることを公開先で確認した。
+- ローカルmainを公開先と同期し、origin/mainを追跡するよう設定した。以後はソース変更のcommit・pushで更新できる。
+
 ## 未確認・未実装
 
-- GitHubリポジトリへのpush、ソースの公開、実際のActions実行、Pagesへの公開。公開先は`ha-newbie/otsukai`。ローカル実装とワークフローを用意した。
 - iPhone/Android実機のインストール、iOS Safariの共有メニューとiCloud Driveへの保存、永続ストレージ許可、Safari固有のデータ保持/更新。
 - ChatGPT直接認証・自動献立提案、外部レシピの自動解析、店舗ごとの売り場/通路マップ/経路最適化、クラウド同期。
 - 調理時の自動在庫消費。同じ週の複数回の買い物リスト。
 
 現在の範囲は買い物リスト1週1件・同時進行1件。完了済みリストは変更できない。実在庫の調理消費は手動更新。バックアップは10MB以下。これらはREADMEとUIで説明している。
 
-次のタスク: 公開先GitHubでPagesを有効化し、iOS実機でインストール→オフライン→iCloudへの手動バックアップ→復元を検証する。その後、在庫消費UXと同じ週の複数回の買い物を改善する。AI直接接続・マップ・同期は独立した後続タスク。
+次のタスク: iOS実機でインストール→オフライン→iCloudへの手動バックアップ→復元を検証する。その後、在庫消費UXと同じ週の複数回の買い物を改善する。AI直接接続・マップ・同期は独立した後続タスク。
 
 ## 変更ファイル（すべて新規）
 

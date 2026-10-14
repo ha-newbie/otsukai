@@ -12,7 +12,8 @@
 
 1. iPhone/Safariホーム画面、共有ファイル→iCloud Drive、ストレージ破棄、更新通知を実機で検証する。
 2. 実使用から在庫の調理消費を記録するUX、同じ週での複数回の買い物、レシピタグ・カテゴリ設定、アクセシビリティを改善する。
-3. 公開先GitHubリポジトリでPagesを有効にしてCIを実行する。
+
+GitHub Pagesへの初回公開は完了。https://ha-newbie.github.io/otsukai/ を利用でき、以後はmainの更新で自動公開する。
 
 ## MVP後の独立タスク（未実装）
 

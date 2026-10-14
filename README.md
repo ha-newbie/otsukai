@@ -1,5 +1,7 @@
 # おつかい
 
+**アプリを開く: https://ha-newbie.github.io/otsukai/**
+
 献立から買い物まで。無料・広告なし・アカウント不要の日本語PWAです。iPhoneを中心に、Android・PCブラウザでも使えるモバイルファーストのUIを採用しています。
 
 レシピ保存 → 週間献立 → 材料集計 → 在庫差引 → 買い物チェック → 購入品を在庫に反映 → JSONバックアップ。
@@ -63,7 +65,7 @@ Safariでアプリをオンラインで開き、共有メニュー → **ホー�
 
 ## GitHub Pages
 
-公開先リポジトリは [ha-newbie/otsukai](https://github.com/ha-newbie/otsukai)。**デプロイ成功後の公開URLは https://ha-newbie.github.io/otsukai/ です。** 公開リポジトリのGitHub Pagesと標準のGitHubホストランナーを利用するため、アプリ用の有料サーバーは不要です。
+公開先リポジトリは [ha-newbie/otsukai](https://github.com/ha-newbie/otsukai)。**公開URLは https://ha-newbie.github.io/otsukai/ です。** 公開リポジトリのGitHub Pagesと標準のGitHubホストランナーを利用するため、アプリ用の有料サーバーは不要です。
 
 ### GitHub側の初回設定
 
