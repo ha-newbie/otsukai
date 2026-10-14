@@ -59,19 +59,44 @@ Playwrightは専用4180番ポートにテスト用の静的サーバーを起動
 - 直接URLの404.htmlが同じ起動HTMLを返すことと、manifestのid/start_url/scopeが`/otsukai/`であることを公開先で確認した。
 - ローカルmainを公開先と同期し、origin/mainを追跡するよう設定した。以後はソース変更のcommit・pushで更新できる。
 
+## 外部レシピ取込・AI支援の追加検証
+
+2026-10-14、ユーザー指示で認証調査と取込を先行。Sign in with ChatGPTは公式の契約枠フロー・Web本人認証・利用条件を確認し、現行iOS PWA単体での直接認証は実装できると確認できなかった。方式・根拠・次の判断を[ai-import.md](ai-import.md)へ記録した。認証が完成したとは扱わない。
+
+実装: 通常のCORS通信によるHTTPSページ取得、HTML/JSON-LD/Recipe解析、HTML/JSONの貼付・ファイル取込、複数候補、推測しない数量解析、元表記と注意の表示、ChatGPT用プロンプト・回答コードブロック対応、検証・編集後の保存。保存には既存のrepositoryを使う。新しい依存なし。DB名・スキーマ・バックアップv1は変更なし。
+
+| 検証 | 結果 |
+| --- | --- |
+| `npm run typecheck` | 成功 |
+| `npm test` | 5ファイル・69件成功（既存38件＋取込31件） |
+| `BASE_PATH=/otsukai/ npm run build` | 成功。manifest・Service Worker・404.htmlを出力 |
+| `BASE_PATH=/otsukai/ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:e2e` | モバイルChromium・10件すべて成功 |
+| `git diff --check` | 成功 |
+
+取込単体検証: 日本語の全角・分数・対応単位、非対応単位/範囲/負値/曖昧量の保留、HTMLの非実行、@graph/複数Recipe/節ごとの手順、出典優先、未知の人数の注意、不正JSON・ID/トークン混入・過剰サイズ/深さの拒否、通常CORS設定、HTTP/通信失敗、実受信サイズ制限、12秒のタイムアウト。
+
+追加/更新E2E: AI回答の検証→元出典保持→編集→保存→再読込、オフラインHTMLファイル解析→複数候補選択→編集→献立→買い物集計、HTML内の外部画像/スクリプトが読み込まれないこと、モバイル画面幅、CORS取得成功、取得失敗時の保存防止と本文/AIへの切替。外部URL応答は合成データのモックで検証しており、実サイトの対応保証ではない。取込プレビューのモバイルスクリーンショットも目視確認した。既存のバックアップ復元・オフライン・Pagesの404/manifest検証も成功。
+
+最初の追加E2Eでは、テストが「2 個」を期待し、既存表示「2個」と不一致になった。既存の表示を維持してテストを修正し、全件を再実行して成功した。実行環境の制限でローカルサーバー起動にはネットワーク権限指定が必要だった。iOS実機・実ChatGPTの応答・対象サイト固有の利用条件/CORSは未確認。
+
+今回の変更ファイル:
+
+- 追加: `src/domain/recipe-input.ts`, `src/domain/recipe-import.ts`, `src/domain/recipe-import.test.ts`, `src/services/recipe-import.ts`, `src/services/recipe-import.test.ts`, `src/ui/RecipeImport.tsx`, `src/ui/RecipeFields.tsx`, `docs/ai-import.md`。
+- 変更: `src/persistence/repository.ts`（入力型/スキーマの移動と再export）、`src/services/ai.ts`, `src/ui/RecipesPage.tsx`, `src/ui/SettingsPage.tsx`, `src/ui/styles.css`, `tests/app.spec.ts`, `README.md`, `AGENTS.md`, `docs/architecture.md`, `docs/roadmap.md`, `docs/backlog.md`, `docs/verification.md`。
+
 ## 未確認・未実装
 
 - ホーム画面へのアプリ保存はユーザーから完了報告あり。機種・OSバージョンは未記録。オフライン起動・データ保持・共有/復元・永続ストレージ・更新、他の端末でのインストールは引き続き確認が必要。
-- ChatGPT直接認証・自動献立提案、外部レシピの自動解析、店舗ごとの売り場/通路マップ/経路最適化、クラウド同期。
+- ChatGPT直接認証・自動献立提案、外部サイト固有の取得・利用条件の実地検証、店舗ごとの売り場/通路マップ/経路最適化、クラウド同期。汎用のRecipe解析と条件付きURL取得は上記のとおり実装済み。
 - 調理時の自動在庫消費。同じ週の複数回の買い物リスト。
 
 現在の範囲は買い物リスト1週1件・同時進行1件。完了済みリストは変更できない。実在庫の調理消費は手動更新。バックアップは10MB以下。これらはREADMEとUIで説明している。
 
-次のタスク: 購入チェックの連続タップ対応を改善し、ホーム画面アプリでのオフライン・保存データ保持・バックアップ/復元・更新を実機で確認する。その後、同じ週の複数回の買い物と調理時の在庫消費を改善する。AI直接接続・マップ・同期は独立した後続タスク。
+次のタスク: 対象レシピサイトを選び、利用条件・CORS・実データを検証する。iOSでChatGPTとの切替・取込を確認し、直接認証には別実行環境を追加するかを決める。その後、購入チェック連続タップ・複数回の買い物・在庫消費を進める。
 
-残件の最新の優先度と完了条件は[backlog.md](backlog.md)を参照。今回はユーザーの保存完了報告を反映し、開発残件を整理した。アプリ機能・データ形式の変更は行っていない。
+残件の最新の優先度と完了条件は[backlog.md](backlog.md)を参照。ホーム画面への保存完了報告を維持し、ユーザーの新しい優先順位を反映した。取込機能を追加し、保存データ形式は維持している。
 
-## 変更ファイル（すべて新規）
+## 初回MVPの変更ファイル（すべて新規）
 
 | 用途 | ファイル |
 | --- | --- |

@@ -1,12 +1,12 @@
-import { z } from 'zod';
 import type { AppData, PantryStock, Recipe, ShoppingItem, Unit } from '../domain/models';
-import { dateSchema, nameSchema, newId, normalizeName, pantrySchema, plannedMealSchema, quantitySchema, recipeSchema, servingsSchema, settingsSchema, shoppingItemSchema, unitSchema } from '../domain/models';
+import { dateSchema, nameSchema, newId, normalizeName, pantrySchema, plannedMealSchema, recipeSchema, servingsSchema, settingsSchema, shoppingItemSchema } from '../domain/models';
+import type { IngredientInput, RecipeInput } from '../domain/recipe-input';
+export type { IngredientInput, RecipeInput } from '../domain/recipe-input';
+export { manualRecipeSchema } from '../domain/recipe-input';
 import { addDays, localDate, monday } from '../domain/dates';
 import { shoppingLines } from '../domain/calculations';
 import { db, type KosajiDB } from './database';
 
-export interface IngredientInput { name: string; quantity: number | null; unit: Unit; categoryId: string; }
-export interface RecipeInput { id?: string; title: string; servings: number; ingredients: IngredientInput[]; steps: string; source: string; sourceUrl: string; }
 export class Repository {
   constructor(readonly database: KosajiDB = db) {}
   private async ingredientId(name: string, categoryId: string): Promise<string> {
@@ -146,8 +146,3 @@ export class Repository {
   async saveSettings(value: AppData['settings'][number]): Promise<void> { await this.database.settings.put(settingsSchema.parse(value)); }
 }
 export const repository = new Repository();
-export const manualRecipeSchema = z.object({
-  title: nameSchema, servings: servingsSchema,
-  ingredients: z.array(z.object({ name: nameSchema, quantity: quantitySchema.nullable(), unit: unitSchema, categoryId: z.enum(['vegetable', 'meat', 'dairy', 'staple', 'seasoning', 'other']) }).strict().refine(value => value.unit === '適量' ? value.quantity === null : value.quantity !== null, '数量と単位が一致しません')).min(1).max(100),
-  steps: recipeSchema.shape.steps, source: recipeSchema.shape.source, sourceUrl: recipeSchema.shape.sourceUrl,
-}).strict();

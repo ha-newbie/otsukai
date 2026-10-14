@@ -139,18 +139,100 @@ test('レシピ人数換算・食材検索とモバイル幅のレイアウト',
 test('ChatGPTのレシピJSONを検証・確認して取り込む', async ({ page }) => {
   await page.goto(appPath);
   await tab(page, 'レシピ');
-  await page.getByRole('button', { name: '手動で取り込む →', exact: true }).click();
-  const dialog = page.getByRole('dialog', { name: 'ChatGPTから手動取込' });
+  await page.getByRole('button', { name: 'レシピを取り込む →', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: 'レシピを取り込む' });
+  await dialog.getByLabel('元レシピのURL').fill('https://recipes.example.test/original');
+  await dialog.getByLabel('出典').fill('元の料理サイト');
+  await dialog.getByRole('button', { name: '本文・AI', exact: true }).click();
+  await expect(dialog.getByRole('link', { name: 'ChatGPTを開く ↗' })).toHaveAttribute('href', 'https://chatgpt.com/');
   await dialog.getByLabel('回答のレシピJSON').fill('{');
   await dialog.getByRole('button', { name: 'JSONを検証する' }).click();
   await expect(dialog.getByRole('alert')).toBeVisible();
-  await dialog.getByLabel('回答のレシピJSON').fill(JSON.stringify({ title: 'かんたんスープ', servings: 2, ingredients: [{ name: 'にんじん', quantity: 200, unit: 'g', categoryId: 'vegetable' }], steps: '', source: '', sourceUrl: '' }));
+  await dialog.getByLabel('回答のレシピJSON').fill('```json\n' + JSON.stringify({ title: 'かんたんスープ', servings: 2, ingredients: [{ name: 'にんじん', quantity: 200, unit: 'g', categoryId: 'vegetable' }], steps: '', source: 'モデルの出典', sourceUrl: 'https://recipes.example.test/model' }) + '\n```');
   await dialog.getByRole('button', { name: 'JSONを検証する' }).click();
   await expect(dialog.getByRole('heading', { name: 'かんたんスープ（2人分）' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'かんたんスープ', exact: true })).toHaveCount(0);
+  await expect(dialog.getByLabel('元レシピのURL')).toHaveValue('https://recipes.example.test/original');
+  await expect(dialog.getByLabel('出典')).toHaveValue('元の料理サイト');
+  await dialog.getByLabel('材料1の数量').fill('300');
   await dialog.getByRole('button', { name: 'この内容で保存する' }).click();
   await expect(dialog).not.toBeVisible();
   await expect(page.getByRole('heading', { name: 'かんたんスープ', exact: true })).toBeVisible();
+  await page.reload(); await tab(page, 'レシピ');
+  await page.getByRole('button').filter({ has: page.getByRole('heading', { name: 'かんたんスープ', exact: true }) }).click();
+  await expect(page.getByRole('dialog')).toContainText('300 g');
+  await expect(page.getByRole('link', { name: '元レシピを見る ↗' })).toHaveAttribute('href', 'https://recipes.example.test/original');
+});
+
+const structuredRecipes = { '@graph': [
+  { '@type': 'Recipe', name: '読込スープ', recipeYield: '2人分', recipeIngredient: ['にんじん 200g', '牛乳 1カップ'], recipeInstructions: [{ '@type': 'HowToStep', text: '煮る。' }] },
+  { '@type': 'Recipe', name: '卵のメモ', recipeYield: '2人分', recipeIngredient: ['卵 1個'] },
+] };
+async function openImport(page: Page) {
+  await tab(page, 'レシピ');
+  await page.getByRole('button', { name: 'レシピを取り込む →', exact: true }).click();
+  return page.getByRole('dialog', { name: 'レシピを取り込む' });
+}
+
+test('HTMLをオフラインで解析し、複数候補から編集・保存して献立に使える', async ({ page, context }) => {
+  const externalRequests: string[] = [];
+  page.on('request', request => { if (request.url().includes('recipes.example.test')) externalRequests.push(request.url()); });
+  await page.goto(appPath);
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)), { timeout: 20000 }).toBe(true);
+  await context.setOffline(true);
+  const dialog = await openImport(page);
+  await dialog.getByLabel('元レシピのURL').fill('https://recipes.example.test/page');
+  await dialog.getByRole('button', { name: 'HTML・JSON', exact: true }).click();
+  const html = `<script>window.importExecuted=true</script><img src="https://recipes.example.test/tracker"><script type="application/ld+json">${JSON.stringify(structuredRecipes)}</script>`;
+  await dialog.getByLabel('取り込むHTML・JSONファイル').setInputFiles({ name: 'recipe.html', mimeType: 'text/html', buffer: Buffer.from(html) });
+  await expect(dialog).toContainText('牛乳 1カップ');
+  await expect(dialog.getByLabel('材料2の単位')).toHaveValue('適量');
+  await expect(page.getByRole('heading', { name: '読込スープ', exact: true })).toHaveCount(0);
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/import-mobile.png' });
+  expect(await page.evaluate(() => 'importExecuted' in window)).toBe(false);
+  expect(externalRequests).toEqual([]);
+  await dialog.getByLabel('取り込むレシピ').selectOption('1');
+  await dialog.getByLabel('材料1の数量').fill('2');
+  await dialog.getByRole('button', { name: 'この内容で保存する' }).click();
+  await expect(dialog).not.toBeVisible();
+  await meal(page);
+  await page.getByRole('button', { name: '買い物リストを作成', exact: true }).click();
+  await expect(page.getByRole('button', { name: '卵の購入数量を調整' })).toHaveText('2個');
+  await page.reload(); await tab(page, 'レシピ');
+  await expect(page.getByRole('heading', { name: '卵のメモ', exact: true })).toBeVisible();
+  await context.setOffline(false);
+});
+
+test('URL取込はCORSで取得した構造化データを確認して保存する', async ({ page }) => {
+  await page.route('https://recipes.example.test/page', route => route.fulfill({ status: 200, contentType: 'application/ld+json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(structuredRecipes) }));
+  await page.goto(appPath);
+  const dialog = await openImport(page);
+  await dialog.getByLabel('元レシピのURL').fill('https://recipes.example.test/page');
+  await dialog.getByRole('button', { name: 'URLから取得する' }).click();
+  await expect(dialog.getByRole('heading', { name: '読込スープ（2人分）' })).toBeVisible();
+  await expect(dialog.getByLabel('元レシピのURL')).toHaveValue('https://recipes.example.test/page');
+  await dialog.getByRole('button', { name: 'この内容で保存する' }).click();
+  await expect(dialog).not.toBeVisible();
+  await expect(page.getByRole('heading', { name: '読込スープ', exact: true })).toBeVisible();
+});
+
+test('URL取得に失敗しても保存せず、本文・AIの方法へ切り替えられる', async ({ page }) => {
+  await page.route('https://recipes.example.test/blocked', route => route.abort('failed'));
+  await page.goto(appPath);
+  const dialog = await openImport(page);
+  await dialog.getByLabel('元レシピのURL').fill('https://recipes.example.test/blocked');
+  await dialog.getByRole('button', { name: 'URLから取得する' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('貼り付け');
+  await expect(dialog.getByRole('button', { name: 'この内容で保存する' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: '本文・AI', exact: true }).click();
+  await dialog.getByLabel('整理したいレシピの本文').fill('材料: にんじん200g。2人分。煮る。');
+  await dialog.getByText('プロンプトを表示', { exact: true }).click();
+  await expect(dialog.getByLabel('コピー用プロンプト')).toHaveValue(/recipes.example.test\/blocked/);
+  await expect(dialog.getByLabel('コピー用プロンプト')).toHaveValue(/にんじん200g/);
+  await expect(dialog).toContainText('Sign in with ChatGPTは未対応');
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'あなたの定番を、ここに。' })).toBeVisible();
 });
 
 test('Pagesの初回404 URLでも起動し、同じURLをオフラインで再読込できる', async ({ page, context }) => {

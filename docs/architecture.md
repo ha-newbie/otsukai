@@ -2,7 +2,7 @@
 
 ## 目的と境界
 
-無料・広告なし・アカウント不要の日本語献立PWA。ユーザーのデータはそのブラウザのIndexedDBにのみ保存する。外部通信はアプリの静的ファイル取得・更新だけ。AI認証、外部URL取得、クラウド同期、店舗マップはMVPに含めない。
+無料・広告なし・アカウント不要の日本語献立PWA。ユーザーの保存データはそのブラウザのIndexedDBにのみ保存する。通常の利用では静的ファイル取得・更新だけを行い、ユーザーがURL取込を選んだ場合に限り元サイトへCORS通信する。ChatGPTを開く・貼り付ける操作はユーザーが行う。AI直接認証、クラウド同期、店舗マップは未実装。
 
 ## レイヤー
 
@@ -35,9 +35,11 @@ Dexie v1の全テーブルを明示。以降の変更は`version(n).stores(...).
 
 vite-plugin-pwaで静的資産をprecacheし、更新はユーザー操作で適用。初回オンライン読込完了後に主要機能をオフライン利用できる。安全領域・44px以上の操作対象・下部タブ・日本語ラベルを採用。GitHub Pagesのリポジトリ名をActionsの環境から取得し、Viteのbaseとmanifest/service workerのscopeに反映する。`deploy.yml`で型・単体・E2E・production buildを検証してmainを公開する。ビルド時に起動HTMLを404.htmlへも出力し、初回の直接URLでもアプリを起動する。Service Worker制御後はscope内のナビゲーションをキャッシュしたindexへ戻す。
 
-## AI拡張
+## レシピ取込・AI拡張
 
-AIProviderは提案・解析・正規化の契約のみ定義。MVPではプロンプトコピーと構造化Recipe JSONの手動取込を提供する。Sign in with ChatGPTのPWA向け公式対応と安全な認証設計を確認するまで直接接続しない。契約にAPI利用枠が含まれるとは仮定しない。トークンを端末DBに保存しない。
+`domain/recipe-input.ts`に保存入力型と厳格な取込スキーマを置く。`domain/recipe-import.ts`はHTMLからのJSON-LD抽出・Recipe解析・推測しない材料解析・AI回答検証の純粋関数。UI/DB/DOMに依存しない。`services/recipe-import.ts`は通常のCORS fetchのみを実行し、Cookie/転送/プロキシを使わず、時間と実受信バイト数を制限する。HTMLはDOMへ挿入しない。UIは複数候補選択・編集・確認後だけ既存repositoryへ保存する。DB/バックアップの形式変更はない。
+
+AIProviderは提案・解析・正規化の契約のみ定義。現在のAI支援はChatGPT用プロンプトコピーと回答JSONの手動取込。2026-10-14に公式認証を調査したところ、オープンソースの契約枠用認証にはloopback listener、Web本人認証には承認済みclientとbackendが必要。現在のiOS PWA単体では適合しないと判断し、直接認証は実装していない。通常API課金を必須にせず、トークンを端末DBに保存しない。公式出典・方式の違い・着手条件は[ai-import.md](ai-import.md)を参照。
 
 ## 検証
 
