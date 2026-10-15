@@ -1,6 +1,7 @@
 import type { Unit } from './models';
 import { manualRecipeSchema, type IngredientInput, type RecipeInput } from './recipe-input';
 import { ingredientName, suggestedCategory } from './ingredient-category';
+import { AppError } from './errors';
 
 export const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 export const MAX_AI_RESPONSE_BYTES = 100_000;
@@ -23,8 +24,8 @@ function text(value: unknown): string {
 export function importSourceUrl(value: string, base?: string): string {
   if (!value.trim()) return '';
   let url: URL;
-  try { url = new URL(value.trim(), base); } catch { throw new Error('元レシピのURLを確認してください'); }
-  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.href.length > 2000) throw new Error('元レシピは認証情報を含まないhttp(s)のURLにしてください');
+  try { url = new URL(value.trim(), base); } catch { throw new AppError('IMP-1001'); }
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.href.length > 2000) throw new AppError('IMP-1001');
   return url.href;
 }
 
@@ -32,16 +33,16 @@ function checkedRecipe(value: unknown): RecipeInput {
   const result = manualRecipeSchema.safeParse(value);
   if (!result.success) {
     const issue = result.error.issues[0];
-    throw new Error(`レシピJSONの形式を確認してください（${issue?.path.join('.') || '全体'}）。料理名・人数・材料・数量と単位・出典が必要です`);
+    throw new AppError('IMP-3004', { field: issue?.path.join('.') }, `レシピJSONの形式を確認してください（${issue?.path.join('.') || '全体'}）。料理名・人数・材料・数量と単位・出典が必要です`);
   }
   return result.data;
 }
 
 export function parseAIRecipeAnswer(answer: string, context: ImportContext = {}): ImportedRecipe {
-  if (new TextEncoder().encode(answer).byteLength > MAX_AI_RESPONSE_BYTES) throw new Error('回答のJSONは100KB以下にしてください');
+  if (new TextEncoder().encode(answer).byteLength > MAX_AI_RESPONSE_BYTES) throw new AppError('IMP-1004', {}, '回答のJSONは100KB以下にしてください');
   const clean = answer.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, '$1');
   let parsed: unknown;
-  try { parsed = JSON.parse(clean); } catch { throw new Error('JSONを読み取れません。ChatGPTの回答のJSON部分を貼り付けてください'); }
+  try { parsed = JSON.parse(clean); } catch { throw new AppError('IMP-3005', { phase: 'AI回答のJSON解析' }); }
   // Validate first so an answer cannot smuggle IDs or credentials into the app.
   const recipe = checkedRecipe(parsed);
   recipe.sourceUrl = importSourceUrl(context.sourceUrl?.trim() || recipe.sourceUrl);
@@ -90,7 +91,7 @@ export function parseIngredientParts(name: string, amount: string): { ingredient
 }
 
 function instructions(value: unknown, depth = 0): string[] {
-  if (depth > 20) throw new Error('手順の入れ子が深すぎます');
+  if (depth > 20) throw new AppError('IMP-3006', {}, '手順の入れ子が深すぎます');
   if (Array.isArray(value)) return value.flatMap(item => instructions(item, depth + 1));
   const item = record(value);
   if (!item) return text(value) ? [text(value)] : [];
@@ -116,12 +117,14 @@ function servings(value: unknown): number | undefined {
 function convertRecipe(node: RecordValue, context: ImportContext): ImportedRecipe {
   const warnings: string[] = [];
   const list = Array.isArray(node.recipeIngredient) ? node.recipeIngredient : record(node.recipeIngredient)?.itemListElement;
-  if (!Array.isArray(list) || !list.length || list.length > 100) throw new Error('材料は1〜100件の一覧が必要です');
+  if (!Array.isArray(list) || !list.length) throw new AppError('IMP-3002', {}, '材料は1〜100件の一覧が必要です');
+  if (list.length > 100) throw new AppError('IMP-3006', {}, '材料は100件まで取り込めます');
   const originalIngredients = list.map(item => {
     const part = record(item);
+    if (part?.['@type'] === 'PropertyValue' && !text(part.name)) throw new AppError('IMP-3003');
     return part?.['@type'] === 'PropertyValue' ? `${text(part.name)} ${text(part.value)}${text(part.unitText)}`.trim() : text(part?.text ?? part?.name ?? item);
   });
-  if (originalIngredients.some(line => !line)) throw new Error('対応していない材料形式が含まれています。本文をChatGPTで整理してください');
+  if (originalIngredients.some(line => !line)) throw new AppError('IMP-3003', {}, '対応していない材料形式が含まれています。本文をChatGPTで整理してください');
   const ingredients = originalIngredients.map((line, index) => {
     const part = record(list[index]);
     const parsed = part?.['@type'] === 'PropertyValue'
@@ -146,9 +149,10 @@ function convertRecipe(node: RecordValue, context: ImportContext): ImportedRecip
 }
 
 export function parseStructuredRecipes(input: string, context: ImportContext = {}): ImportedRecipe[] {
-  if (new TextEncoder().encode(input).byteLength > MAX_IMPORT_BYTES) throw new Error('HTML・構造化JSONは2MB以下にしてください');
+  if (new TextEncoder().encode(input).byteLength > MAX_IMPORT_BYTES) throw new AppError('IMP-1004', {}, 'HTML・構造化JSONは2MB以下にしてください');
   if (context.sourceUrl) importSourceUrl(context.sourceUrl);
   const clean = input.trim();
+  if (!clean) throw new AppError('IMP-1003');
   const documents: unknown[] = [];
   let invalidBlocks = 0;
   const parse = (json: string) => { try { documents.push(JSON.parse(json)); } catch { invalidBlocks++; } };
@@ -161,9 +165,9 @@ export function parseStructuredRecipes(input: string, context: ImportContext = {
   const nodes: RecordValue[] = [];
   const queue = documents.map(value => ({ value, depth: 0 }));
   for (let index = 0; index < queue.length; index++) {
-    if (queue.length > 20_000) throw new Error('構造化データの項目が多すぎます');
+    if (queue.length > 20_000) throw new AppError('IMP-3006', {}, '構造化データの項目が多すぎます');
     const current = queue[index]!;
-    if (current.depth > 30) throw new Error('構造化データの入れ子が深すぎます');
+    if (current.depth > 30) throw new AppError('IMP-3006', {}, '構造化データの入れ子が深すぎます');
     const item = record(current.value);
     if (item) {
       const types = Array.isArray(item['@type']) ? item['@type'] : [item['@type']];
@@ -172,13 +176,13 @@ export function parseStructuredRecipes(input: string, context: ImportContext = {
     const values = Array.isArray(current.value) ? current.value : item ? Object.values(item) : [];
     for (const value of values) if (value !== null && typeof value === 'object') queue.push({ value, depth: current.depth + 1 });
   }
-  if (nodes.length > 20) throw new Error('レシピは一度に20件まで読み込めます。対象の構造化JSONだけを貼り付けてください');
+  if (nodes.length > 20) throw new AppError('IMP-3006', {}, 'レシピは一度に20件まで読み込めます。対象の構造化JSONだけを貼り付けてください');
   const result: ImportedRecipe[] = [];
-  const failures: string[] = [];
+  const failures: AppError[] = [];
   for (const node of nodes) {
-    try { result.push(convertRecipe(node, context)); } catch (error) { failures.push(error instanceof Error ? error.message : '形式が不正です'); }
+    try { result.push(convertRecipe(node, context)); } catch (error) { failures.push(error instanceof AppError ? error : new AppError('IMP-3004')); }
   }
-  if (!result.length) throw new Error(failures[0] ?? 'Recipe形式の構造化データが見つかりません。本文をChatGPTで整理する方法をお試しください');
+  if (!result.length) throw failures[0] ?? new AppError(invalidBlocks && !documents.length ? 'IMP-3005' : 'IMP-3001');
   const warnings = [invalidBlocks ? `${invalidBlocks}件の壊れたJSONブロックを読み飛ばしました。` : '', failures.length ? `${failures.length}件のレシピは形式が不正なため読み込めませんでした。` : ''].filter(Boolean);
   return result.map(item => ({ ...item, warnings: [...warnings, ...item.warnings] }));
 }

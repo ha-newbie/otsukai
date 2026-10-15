@@ -2,7 +2,7 @@ import { normalizeName } from './models';
 
 /** Group labels are presentation, not part of a food's shared identity. */
 export function ingredientName(value: string): string {
-  return value.normalize('NFKC').trim().replace(/^(?:(?:[★☆●○◎◇◆■□▲△＊*]+|\([A-Za-z]\)|[A-Z][.:：])\s*|[A-Z]\s+)+/, '').trim();
+  return value.normalize('NFKC').trim().replace(/^(?:(?:[★☆●○◯◎◇◆■□▲△＊*]+|\([A-Za-z]\)|[A-Z][.:：])\s*|[A-Z]\s+)+/, '').trim();
 }
 const seasonings = new Set([
   '塩', '食塩', '岩塩', '粗塩', '砂糖', '上白糖', '三温糖', 'グラニュー糖', 'きび砂糖', '黒砂糖',

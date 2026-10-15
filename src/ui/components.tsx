@@ -1,9 +1,11 @@
 import { createContext, useContext, useEffect, useRef, type ReactNode } from 'react';
 import { units, type AppData, type Unit } from '../domain/models';
 import type { IngredientInput } from '../persistence/repository';
+import type { ErrorReport } from '../services/diagnostics';
+import { ErrorBanner } from './ErrorBanner';
 
 export type Action = (operation: () => Promise<void>, message?: string) => Promise<boolean>;
-export const UIContext = createContext({ error: '', pending: false });
+export const UIContext = createContext<{ error: string; pending: boolean; failure: ErrorReport | null }>({ error: '', pending: false, failure: null });
 export function Icon({ name, size = 22 }: { name: 'calendar' | 'book' | 'basket' | 'pantry' | 'settings' | 'plus' | 'chevron' | 'check' | 'spoon' | 'search'; size?: number }) {
   const paths = {
     calendar: <><rect x="3" y="5" width="18" height="16" rx="3" /><path d="M7 3v4m10-4v4M3 11h18M7 15h2m4 0h2m-8 3h2" /></>,
@@ -21,7 +23,7 @@ export function Icon({ name, size = 22 }: { name: 'calendar' | 'book' | 'basket'
 }
 export function Modal({ title, children, onClose }: { title: string; children: ReactNode; onClose: () => void }) {
   const dialog = useRef<HTMLDialogElement>(null);
-  const { error, pending } = useContext(UIContext);
+  const { error, pending, failure } = useContext(UIContext);
   useEffect(() => {
     const element = dialog.current;
     element?.showModal();
@@ -29,7 +31,7 @@ export function Modal({ title, children, onClose }: { title: string; children: R
   }, []);
   return <dialog ref={dialog} onCancel={event => { if (pending) event.preventDefault(); else onClose(); }} aria-label={title}>
     <div className="dialog-header"><h2>{title}</h2><button type="button" className="icon-button" disabled={pending} onClick={onClose} aria-label="閉じる">×</button></div>
-    <div className="dialog-body">{error && <div className="banner error" role="alert">{error}</div>}<fieldset disabled={pending}>{children}</fieldset></div>
+    <div className="dialog-body">{failure ? <ErrorBanner report={failure} /> : error && <div className="banner error" role="alert">{error}</div>}<fieldset disabled={pending}>{children}</fieldset></div>
   </dialog>;
 }
 export function Confirm({ title, children, onConfirm, onClose, destructive = false }: { title: string; children: ReactNode; onConfirm: () => void; onClose: () => void; destructive?: boolean }) {

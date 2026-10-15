@@ -7,6 +7,8 @@ describe('材料名と調味料の分類', () => {
     expect(ingredientName('●（A） しょうゆ')).toBe('しょうゆ');
     expect(ingredientName('A 砂糖')).toBe('砂糖');
     expect(ingredientName('A1ソース')).toBe('A1ソース');
+    expect(ingredientName('◯醤油')).toBe('醤油');
+    expect(suggestedCategory('◯醤油')).toBe('seasoning');
   });
   it('既知の調味料を分類し、塩鮭などの部分一致は使わない', () => {
     for (const value of ['しょうゆ', '醤油（濃口）', '●砂糖', 'オリーブオイル', '塩こしょう']) expect(suggestedCategory(value)).toBe('seasoning');

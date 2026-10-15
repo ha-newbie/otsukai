@@ -1,19 +1,27 @@
 import { importSourceUrl, MAX_IMPORT_BYTES } from '../domain/recipe-import';
+import { AppError, type ErrorContext } from '../domain/errors';
 
-/** Ordinary CORS fetch only. No proxy, cookies, opaque responses or redirects. */
-export async function fetchRecipePage(value: string): Promise<string> {
+/** Runs in the user's browser. Ordinary CORS only; never a proxy or opaque fetch. */
+export interface RecipeResponse { content: string; url: string; httpStatus: number; contentType: string; }
+export async function fetchRecipeResponse(value: string): Promise<RecipeResponse> {
   const url = importSourceUrl(value);
-  if (!url || new URL(url).protocol !== 'https:') throw new Error('URLから取得する場合はhttpsのURLを入力してください');
+  if (!url) throw new AppError('IMP-1003', { phase: 'URL入力' });
+  if (new URL(url).protocol !== 'https:') throw new AppError('IMP-1002', { url });
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new AppError('IMP-2001', { url });
+  const context: ErrorContext = { url };
   const controller = new AbortController();
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; controller.abort(); }, 12_000);
   try {
-    const response = await fetch(url, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'error', cache: 'no-store', signal: controller.signal });
-    if (!response.ok) throw new Error(`ページを取得できませんでした（HTTP ${response.status}）。本文の貼り付けをお試しください`);
+    const response = await fetch(url, { mode: 'cors', credentials: 'omit', referrerPolicy: 'no-referrer', redirect: 'follow', cache: 'no-store', signal: controller.signal });
+    context.httpStatus = response.status;
+    if (response.url && (!response.url.startsWith('https://') || new URL(response.url).username || new URL(response.url).password)) throw new AppError('IMP-2009', context);
+    if (!response.ok) throw new AppError('IMP-2004', context, `元サイトがHTTP ${response.status}を返しました`);
     const contentType = response.headers.get('content-type') ?? '';
-    if (!/^(?:text\/html|application\/(?:xhtml\+xml|(?:ld\+)?json))(?:;|$)/i.test(contentType)) throw new Error('HTML・JSON以外のファイルは取り込めません');
-    if (Number(response.headers.get('content-length')) > MAX_IMPORT_BYTES) throw new Error('ページは2MB以下にしてください');
-    if (!response.body) throw new Error('ページの本文がありません');
+    context.contentType = contentType;
+    if (!/^(?:text\/html|application\/(?:xhtml\+xml|(?:ld\+)?json))$/i.test(contentType.split(';')[0]?.trim() ?? '')) throw new AppError('IMP-2005', context);
+    if (Number(response.headers.get('content-length')) > MAX_IMPORT_BYTES) throw new AppError('IMP-2006', context);
+    if (!response.body) throw new AppError('IMP-2007', context);
     const reader = response.body.getReader();
     const chunks: Uint8Array[] = [];
     let bytes = 0;
@@ -22,18 +30,23 @@ export async function fetchRecipePage(value: string): Promise<string> {
         const part = await reader.read();
         if (part.done) break;
         bytes += part.value.byteLength;
-        if (bytes > MAX_IMPORT_BYTES) throw new Error('ページは2MB以下にしてください');
+        if (bytes > MAX_IMPORT_BYTES) throw new AppError('IMP-2006', context);
         chunks.push(part.value);
       }
-    } finally { await reader.cancel(); reader.releaseLock(); }
+    } finally { try { await reader.cancel(); } catch { /* Cleanup must not replace the original failure. */ } reader.releaseLock(); }
     const body = new Uint8Array(bytes);
     let offset = 0;
     for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
     const charset = contentType.match(/charset\s*=\s*["']?([^;\s"']+)/i)?.[1] ?? 'utf-8';
-    try { return new TextDecoder(charset).decode(body); } catch { throw new Error('このページの文字コードに対応していません。本文を貼り付けてください'); }
+    let content: string;
+    try { content = new TextDecoder(charset).decode(body); } catch { throw new AppError('IMP-2008', context); }
+    if (!content.trim()) throw new AppError('IMP-2007', context);
+    return { content, url: response.url || url, httpStatus: response.status, contentType };
   } catch (error) {
-    if (timedOut) throw new Error('取得が12秒でタイムアウトしました。本文の貼り付けをお試しください');
-    if (error instanceof TypeError) throw new Error('ブラウザから取得できませんでした。CORS・転送・通信状態などの制限があります。本文やHTMLを貼り付けて取り込めます');
-    throw error;
+    if (timedOut) throw new AppError('IMP-2002', context);
+    if (error instanceof AppError) throw error;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) throw new AppError('IMP-2001', context);
+    throw new AppError('IMP-2003', context);
   } finally { clearTimeout(timer); controller.abort(); }
 }
+export async function fetchRecipePage(value: string): Promise<string> { return (await fetchRecipeResponse(value)).content; }

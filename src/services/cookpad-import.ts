@@ -1,6 +1,7 @@
 import { importSourceUrl, MAX_IMPORT_BYTES, parseStructuredRecipes, type ImportContext, type ImportedRecipe } from '../domain/recipe-import';
+import { AppError } from '../domain/errors';
 
-function cookpadRecipeUrl(value: string): string {
+export function cookpadRecipeUrl(value: string): string {
   try {
     const url = new URL(importSourceUrl(value));
     return /^(?:www\.)?cookpad\.com$/i.test(url.hostname) && /^\/(?:jp\/recipes|recipe)\/\d+(?:[-/]|$)/.test(url.pathname) ? url.href : '';
@@ -10,7 +11,8 @@ const plainText = (node: Element | null) => node?.textContent?.replace(/\s+/g, '
 
 /** Uses an unattached template: script, images, CSS, frames and handlers stay inert. */
 export function parseRecipeDocument(input: string, context: ImportContext = {}): ImportedRecipe[] {
-  if (new TextEncoder().encode(input).byteLength > MAX_IMPORT_BYTES) throw new Error('HTML・構造化JSONは2MB以下にしてください');
+  if (new TextEncoder().encode(input).byteLength > MAX_IMPORT_BYTES) throw new AppError('IMP-1004', {}, 'HTML・構造化JSONは2MB以下にしてください');
+  if (!input.trim()) throw new AppError('IMP-1003');
   if (/^[\s]*[\[{]/.test(input)) return parseStructuredRecipes(input, context);
   const template = document.createElement('template');
   template.innerHTML = input;
@@ -24,13 +26,13 @@ export function parseRecipeDocument(input: string, context: ImportContext = {}):
   const rows = section?.querySelectorAll('li[id^="ingredient_"], .ingredient_row');
   if (!rows?.length) {
     if (structured.length) return structured.map(value => ({ ...value, warnings: ['材料欄のHTMLを確認できなかったため、構造化データから読み込みました。材料名と分量を確認してください。', ...value.warnings] }));
-    throw new Error('クックパッドの材料欄が見つかりません。材料が表示されたページのHTMLか、材料の本文を使ってください');
+    throw new AppError('IMP-3002', { url: cookpadUrl }, 'クックパッドの材料欄が見つかりません。材料が表示されたページのHTMLか、ページ取込を使ってください');
   }
-  if (rows.length > 100) throw new Error('材料は100件まで取り込めます');
+  if (rows.length > 100) throw new AppError('IMP-3006', { url: cookpadUrl }, '材料は100件まで取り込めます');
   const parts = Array.from(rows).map(row => {
     const name = plainText(row.querySelector(':scope > span, .ingredient_name, .name'));
     const amount = plainText(row.querySelector(':scope > bdi, .ingredient_quantity, .quantity'));
-    if (!name) throw new Error('材料名を読み取れない行があります。材料の本文から確認して取り込んでください');
+    if (!name) throw new AppError('IMP-3003', { url: cookpadUrl });
     return { '@type': 'PropertyValue', name, value: amount };
   });
   const heading = plainText(root.querySelector('article#recipe h1, h1'));

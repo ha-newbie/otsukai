@@ -27,6 +27,7 @@ const pagesFallback: Plugin = {
 };
 export default defineConfig({
   base,
+  define: { __APP_BUILD__: JSON.stringify(process.env.GITHUB_SHA?.slice(0, 12) || 'local') },
   plugins: [react(), tailwindcss(), VitePWA({
     base, scope: base, filename: 'sw.js', registerType: 'prompt',
     includeAssets: ['icon.svg', 'apple-touch-icon.png', 'icon-192.png', 'icon-512.png'],

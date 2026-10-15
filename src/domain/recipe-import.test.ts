@@ -18,6 +18,14 @@ describe('推測しない材料解析', () => {
 });
 
 describe('Recipe構造化データの取込', () => {
+  it('JSON破損・Recipe不在・材料欠落・行破損・件数超過を固定コードで区別する', () => {
+    for (const [input, code] of [
+      ['{', 'IMP-3005'], ['{}', 'IMP-3001'],
+      [JSON.stringify({ ...recipe, recipeIngredient: [] }), 'IMP-3002'],
+      [JSON.stringify({ ...recipe, recipeIngredient: [{ '@type': 'PropertyValue', value: '100g' }] }), 'IMP-3003'],
+      [JSON.stringify({ ...recipe, recipeIngredient: Array.from({ length: 101 }, () => '塩 1g') }), 'IMP-3006'],
+    ]) expect(() => parseStructuredRecipes(input!)).toThrow(expect.objectContaining({ code }));
+  });
   it('材料だけの指定では作り方を保存せず、調味料は残す', () => {
     const result = parseStructuredRecipes(JSON.stringify(recipe), { ingredientsOnly: true })[0]!;
     expect(result.recipe.steps).toBe('');

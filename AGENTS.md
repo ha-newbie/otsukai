@@ -14,4 +14,5 @@
 - 検証コマンド: `npm run typecheck`, `npm test`, `npm run build`, `npm run test:e2e`。必要なブラウザは`npx playwright install chromium`で用意する。システムChromiumは`PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH`で指定できる。
 - `BASE_PATH=/otsukai/ npm run build`でPagesサブパスを確認する。E2Eにも同じBASE_PATHを指定する。
 - 実装内容や制約をREADMEとdocsに反映する。実機未確認・未実装・未公開の項目を完成済みと記載しない。
+- 取込エラーは`src/domain/errors.ts`の固定コードを使い、文言から原因を推定しない。ブラウザの読取不可だけでCORS/DNS/TLSやHTTP状態を断定しない。実行場所・対処・診断の規約は`docs/import-errors.md`を参照し、本文・query・トークンを診断へ含めない。
 - 依存追加は必要性を確認し、package-lock.jsonも更新する。生成物・ローカルデータ・認証情報をコミットしない。

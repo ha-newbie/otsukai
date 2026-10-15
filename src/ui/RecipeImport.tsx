@@ -4,13 +4,17 @@ import { importSourceUrl, MAX_IMPORT_BYTES, parseAIRecipeAnswer, type ImportedRe
 import { manualRecipeSchema, type RecipeInput } from '../domain/recipe-input';
 import { repository } from '../persistence/repository';
 import { recipePrompt } from '../services/ai';
-import { fetchRecipePage } from '../services/recipe-import';
-import { parseRecipeDocument } from '../services/cookpad-import';
+import { fetchRecipeResponse } from '../services/recipe-import';
+import type { ErrorContext } from '../domain/errors';
+import { cookpadRecipeUrl, parseRecipeDocument } from '../services/cookpad-import';
+import { copyImportText } from '../services/page-capture';
+import { AppError } from '../domain/errors';
+import { PageCaptureHelp } from './PageCaptureHelp';
 import { normalizeName } from '../domain/models';
 import { Modal, type Action } from './components';
 import { RecipeFields } from './RecipeFields';
 
-type Method = 'url' | 'ai' | 'structured';
+type Method = 'url' | 'page' | 'ai' | 'structured';
 export function RecipeImport({ data, action, onClose }: { data: AppData; action: Action; onClose: () => void }) {
   const [method, setMethod] = useState<Method>('url');
   const [sourceUrl, setSourceUrl] = useState('');
@@ -24,17 +28,20 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
   const [draft, setDraft] = useState<RecipeInput | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const context = { sourceUrl, source, defaultServings: data.settings[0]?.defaultServings ?? 2, ingredientsOnly };
+  const cookpadUrl = cookpadRecipeUrl(sourceUrl);
   const showCandidates = (values: ImportedRecipe[]) => {
     const currentCategories = new Map(data.ingredients.map(value => [value.normalizedName, value.categoryId]));
     const adjusted = values.map(value => ({ ...value, recipe: { ...value.recipe, ingredients: value.recipe.ingredients.map(item => ({ ...item, categoryId: currentCategories.get(normalizeName(item.name)) ?? item.categoryId })) } }));
     setCandidates(adjusted); setSelected(0); setDraft(adjusted[0]?.recipe ?? null);
   };
-  const loadStructured = (input: string) => showCandidates(parseRecipeDocument(input, context));
+  const loadStructured = (input: string, phase = 'HTML・JSON解析', observed: ErrorContext = {}) => {
+    try { showCandidates(parseRecipeDocument(input, context)); }
+    catch (error) { if (error instanceof AppError) throw new AppError(error.code, { ...error.context, url: sourceUrl || error.context.url, ...observed, phase }, error.message); throw error; }
+  };
   const copyPrompt = () => void action(async () => {
-    if (!text.trim() && !sourceUrl.trim()) throw new Error('元レシピのURLか本文を入力してください');
+    if (!text.trim() && !sourceUrl.trim()) throw new AppError('IMP-1003');
     importSourceUrl(sourceUrl);
-    if (!navigator.clipboard) throw new Error('コピーに対応していません。「プロンプトを表示」から選択してコピーしてください');
-    await navigator.clipboard.writeText(recipePrompt(text, context));
+    await copyImportText(recipePrompt(text, context));
   }, 'プロンプトをコピーしました。ChatGPTに貼り付けてください');
   const save = async (event: FormEvent) => {
     event.preventDefault();
@@ -64,13 +71,17 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
       <label>出典 <span className="optional">任意</span><input maxLength={200} value={source} placeholder="サイト名・作者名" onChange={event => setSource(event.target.value)} /></label>
       <label className="checkbox-label"><input type="checkbox" checked={ingredientsOnly} onChange={event => setIngredientsOnly(event.target.checked)} />材料だけを取り込む（作り方は保存しない）</label>
       <div className="import-methods" role="group" aria-label="取込方法">
-        <button aria-pressed={method === 'url'} onClick={() => setMethod('url')}>URL</button><button aria-pressed={method === 'ai'} onClick={() => setMethod('ai')}>本文・AI</button><button aria-pressed={method === 'structured'} onClick={() => setMethod('structured')}>HTML・JSON</button>
+        <button aria-pressed={method === 'url'} onClick={() => setMethod('url')}>URL</button><button aria-pressed={method === 'page'} onClick={() => setMethod('page')}>ページ取込</button><button aria-pressed={method === 'ai'} onClick={() => setMethod('ai')}>本文・AI</button><button aria-pressed={method === 'structured'} onClick={() => setMethod('structured')}>HTML・JSON</button>
       </div>
       {method === 'url' && <section>
-        <h3>URLから読み込む</h3><p className="help-text">ブラウザからの取得を許可し、レシピの構造化データを持つページに対応しています。多くのサイトは直接取得できません。その場合は「本文・AI」か「HTML・JSON」を使ってください。</p>
-        <button className="button primary full" disabled={!sourceUrl.trim()} onClick={() => void action(async () => loadStructured(await fetchRecipePage(sourceUrl)), '内容を確認して保存してください')}>URLから取得する</button>
-        <p className="help-text">オンラインで、ログイン不要のhttpsページを取得します。転送がある場合は元サイトで開いた後のURLを入力してください。元サイトへ閲覧通信が発生します。</p>
+        <h3>URLから読み込む</h3>{cookpadUrl ? <div className="import-notice"><p><strong>クックパッドはページ取込を使ってください</strong></p><p>元サイトはPWAからの直接読取を許可していません。Safariで開いたページから材料を受け取れます。URL入力だけの自動取得には対応していません。</p><button className="button primary full" onClick={() => setMethod('page')}>Safariでの取込手順を開く</button></div> : <p className="help-text">この端末のブラウザから直接取得します。別サイトからの読取（CORS）を許可しているページに対応しています。取得できない場合は「ページ取込」「HTML・JSON」「本文・AI」を使います。</p>}
+        <button className={`button ${cookpadUrl ? 'secondary' : 'primary'} full`} disabled={!sourceUrl.trim()} onClick={() => void action(async () => {
+          const response = await fetchRecipeResponse(sourceUrl);
+          loadStructured(response.content, 'URL応答のレシピ解析', { url: response.url, httpStatus: response.httpStatus, contentType: response.contentType });
+        }, '内容を確認して保存してください')}>{cookpadUrl ? '直接取得を試す（診断用）' : 'URLから取得する'}</button>
+        <p className="help-text">オンラインのhttpsページをCookieなしで取得します。通常の転送にもCORS制約内で対応します。元サイトへ通信します。GitHub Pages上でのサーバー取得は行いません。</p>
       </section>}
+      {method === 'page' && <PageCaptureHelp context={context} pageUrl={cookpadUrl} action={action} onResult={showCandidates} />}
       {method === 'ai' && <section>
         <h3>ChatGPTで整理する</h3><p className="help-text">① URLや本文を入力 → ② プロンプトをコピーしてChatGPTに貼り付け → ③ 回答のJSONをここに貼り付けます。コピーだけでは外部に送信されません。ChatGPTに貼り付けた内容はChatGPT側で処理されます。</p>
         <label>整理したいレシピの本文<textarea rows={5} maxLength={20000} value={text} placeholder="材料と作り方を貼り付けてください。URLだけでも依頼できます。" onChange={event => setText(event.target.value)} /></label>
@@ -86,8 +97,10 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
         <input hidden ref={fileInput} type="file" accept=".html,.htm,.json,text/html,application/json,application/ld+json" aria-label="取り込むHTML・JSONファイル" onChange={event => {
           const file = event.target.files?.[0]; event.target.value = '';
           if (file) void action(async () => {
-            if (file.size > MAX_IMPORT_BYTES) throw new Error('HTML・JSONファイルは2MB以下にしてください');
-            const input = await file.text(); setStructured(input); loadStructured(input);
+            if (file.size > MAX_IMPORT_BYTES) throw new AppError('IMP-1004', { phase: 'ファイル読込' }, 'HTML・JSONファイルは2MB以下にしてください');
+            let input: string;
+            try { input = await file.text(); } catch { throw new AppError('IMP-3007'); }
+            setStructured(input); loadStructured(input);
           }, '内容を確認して保存してください');
         }} />
         <button className="button secondary full" onClick={() => fileInput.current?.click()}>HTML・JSONファイルを選択</button>

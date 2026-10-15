@@ -42,11 +42,12 @@ ChatGPT契約を利用できる公式のオープンソース向け方式自体�
 
 ## 通信・サイズ・対応範囲
 
-- URL通信は`mode:cors`・`credentials:omit`・`referrerPolicy:no-referrer`。Cookieや認証情報を添付せず、転送は拒否する。元サイトをブラウザで開いた後の最終URLを指定する。
+- URL通信は`mode:cors`・`credentials:omit`・`referrerPolicy:no-referrer`。Cookieや認証情報を添付しない。URL不具合の修正で`redirect:follow`に変更し、CORS制約内の通常転送を扱う。応答を読めない原因の詳細はブラウザから判別できない場合がある。
 - 制限回避のプロキシやno-cors取得はしない。通常のCORS許可は転載・再利用の許諾を意味しない。利用条件上認められたページで使う。
 - ページ/HTML/構造化JSONは2MBまで、通信は12秒で中断。実受信バイト数も制限する。候補は20件まで、深い入れ子や過剰な項目も拒否する。
 - AI回答は100KBまで、本文入力は20,000文字。JSONを厳格に検証し、ID・トークン・未知のキーは拒否する。
 - URL取得はオンラインが必要。サイトのCORS、ログイン、転送、構造化データ、利用条件に依存する。取得できない場合は本文・HTMLの手動取込を使う。
+- クックパッドはアプリ内でSafari共有からのページ取込へ案内する。元ページで実行するコードと受け渡しを実装し、設定手順・iOS実機の未確認範囲・固定エラーコードは[import-errors.md](import-errors.md)にまとめた。URL入力だけで自動取得できるとは表示しない。
 - ChatGPTで処理するにはユーザーがChatGPTへ貼り付ける。アプリはレシピ/在庫/個人情報を自動送信しない。
 - クックパッドの公開ページ1件でHTML構造・JSON-LD・CORSと利用規約を確認し、材料欄アダプターを追加した。確認範囲と残件は[cookpad-import.md](cookpad-import.md)参照。全HTML版の対応保証、画像/PDF解析、JSON-LDの参照解決はない。名前・値・単位が明示されたPropertyValueは対応する。
 

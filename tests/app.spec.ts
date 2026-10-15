@@ -224,7 +224,7 @@ test('URL取得に失敗しても保存せず、本文・AIの方法へ切り替
   const dialog = await openImport(page);
   await dialog.getByLabel('元レシピのURL').fill('https://recipes.example.test/blocked');
   await dialog.getByRole('button', { name: 'URLから取得する' }).click();
-  await expect(dialog.getByRole('alert')).toContainText('貼り付け');
+  await expect(dialog.getByRole('alert')).toContainText('IMP-2003');
   await expect(dialog.getByRole('button', { name: 'この内容で保存する' })).toHaveCount(0);
   await dialog.getByRole('button', { name: '本文・AI', exact: true }).click();
   await dialog.getByLabel('整理したいレシピの本文').fill('材料: にんじん200g。2人分。煮る。');
@@ -376,4 +376,104 @@ test('v1バックアップを復元しても、除外対象の調味料の購入
   await expect(page.getByRole('button', { name: '塩の購入数量を調整' })).toHaveText('2 g');
   await page.reload(); await tab(page, '買い物');
   await expect(page.getByRole('checkbox', { name: '塩を購入チェック' })).toBeChecked();
+});
+
+test('指定Cookpad URLのCORS読取不可をコードで示し、実行手順と匿名の診断を表示する', async ({ page }) => {
+  const url = 'https://cookpad.com/jp/recipes/18472521';
+  // Simulate the unreadable response; actual browser CORS is checked against a second local origin below.
+  await page.route(url, route => route.abort('failed'));
+  await page.goto(appPath);
+  const dialog = await openImport(page);
+  await dialog.getByLabel('元レシピのURL').fill(url);
+  await expect(dialog).toContainText('URL入力だけの自動取得には対応していません');
+  await dialog.getByRole('button', { name: '直接取得を試す（診断用）' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('IMP-2003');
+  await dialog.getByRole('alert').getByText('診断情報', { exact: true }).click();
+  const report = JSON.parse(await dialog.getByLabel('診断情報', { exact: true }).inputValue());
+  expect(report).toMatchObject({ app: 'otsukai', code: 'IMP-2003', phase: 'URL取得', context: { url } });
+  expect(report.context.httpStatus).toBeUndefined();
+  await expect(dialog.getByRole('button', { name: 'この内容で保存する' })).toHaveCount(0);
+  await dialog.getByRole('button', { name: 'Safariでの取込手順を開く' }).click();
+  await expect(dialog.getByRole('link', { name: '元ページを開く ↗' })).toHaveAttribute('href', url);
+  await dialog.getByText('初回だけ：ショートカットの作り方', { exact: true }).click();
+  await expect(dialog.getByLabel('Safariショートカット用コード')).toHaveValue(/completion\(JSON.stringify/);
+});
+
+test('配布するSafari用コードを元ページで実行し、結果をPWAで検証・確認・保存する', async ({ page, context }) => {
+  const url = 'https://cookpad.com/jp/recipes/999000001';
+  const html = (await readFile('tests/fixtures/cookpad-ingredients.html', 'utf-8')).replace('●（A）しょうゆ', '◯しょうゆ');
+  await page.goto(appPath);
+  const dialog = await openImport(page);
+  await dialog.getByLabel('元レシピのURL').fill(url);
+  await dialog.getByRole('button', { name: 'Safariでの取込手順を開く' }).click();
+  await dialog.getByText('初回だけ：ショートカットの作り方', { exact: true }).click();
+  const script = await dialog.getByLabel('Safariショートカット用コード').inputValue();
+  const source = await context.newPage();
+  await source.route('**/*', route => route.request().url() === url ? route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }) : route.abort());
+  await source.goto(url);
+  await source.waitForLoadState('networkidle');
+  let requests = 0;
+  source.on('request', () => requests++);
+  const result = await source.evaluate(code => {
+    const state = window as Window & { completion?: (value: string) => void };
+    let output = ''; let completions = 0;
+    state.completion = value => { output = value; completions++; };
+    const before = document.documentElement.outerHTML;
+    new Function(code)();
+    return { output, completions, unchanged: before === document.documentElement.outerHTML };
+  }, script);
+  expect(result.completions).toBe(1); expect(result.unchanged).toBe(true); expect(requests).toBe(0);
+  await source.close();
+  await dialog.getByLabel('ページで取得したデータ').fill('not json');
+  await dialog.getByRole('button', { name: 'ページの材料を解析する' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('IMP-4002');
+  await dialog.getByLabel('ページで取得したデータ').fill(result.output);
+  await dialog.getByRole('button', { name: 'ページの材料を解析する' }).click();
+  await expect(dialog.getByLabel('料理名', { exact: true })).toHaveValue('取込テストの野菜煮');
+  await expect(dialog.getByLabel('材料2の食材名')).toHaveValue('しょうゆ');
+  await expect(dialog.getByLabel('材料2のカテゴリ')).toHaveValue('seasoning');
+  await expect(dialog.getByLabel('作り方')).toHaveValue('');
+  await expect(dialog.getByLabel('元レシピのURL')).toHaveValue(url);
+  await dialog.getByRole('button', { name: 'この内容で保存する' }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.reload(); await tab(page, 'レシピ');
+  await expect(page.getByRole('heading', { name: '取込テストの野菜煮', exact: true })).toBeVisible();
+});
+
+test('実際の別オリジンでHTTP 200のCORS拒否・許可と通常の転送を検証する', async ({ page }) => {
+  await page.goto(appPath);
+  const result = await page.evaluate(async () => {
+    let unreadable = false;
+    try { await fetch('http://127.0.0.1:4181/denied', { mode: 'cors', credentials: 'omit' }); } catch (error) { unreadable = error instanceof TypeError; }
+    const response = await fetch('http://127.0.0.1:4181/redirect', { mode: 'cors', credentials: 'omit', redirect: 'follow' });
+    return { unreadable, status: response.status, redirected: response.redirected, url: response.url, data: await response.json() };
+  });
+  expect(result).toEqual({ unreadable: true, status: 200, redirected: true, url: 'http://127.0.0.1:4181/allowed', data: { ok: true } });
+});
+
+test('HTTP拒否とHTTP成功後の材料解析エラーを区別し、URLのクエリを診断へ残さない', async ({ page }) => {
+  await page.goto(appPath);
+  const dialog = await openImport(page);
+  const cases = [
+    { url: 'https://recipes.example.test/forbidden?private=secret#fragment', status: 403, body: 'denied', code: 'IMP-2004', phase: 'URL取得' },
+    { url: 'https://cookpad.com/jp/recipes/18472521?private=secret#fragment', status: 200, body: '<h1>材料がない画面</h1>', code: 'IMP-3002', phase: 'URL応答のレシピ解析' },
+  ];
+  for (const item of cases) {
+    await page.route(item.url.split('#')[0]!, route => route.fulfill({ status: item.status, contentType: 'text/html', headers: { 'access-control-allow-origin': '*' }, body: item.body }));
+    await dialog.getByLabel('元レシピのURL').fill(item.url);
+    await dialog.getByRole('button', { name: item.url.includes('cookpad.com') ? '直接取得を試す（診断用）' : 'URLから取得する' }).click();
+    await expect(dialog.getByRole('alert')).toContainText(item.code);
+    await dialog.getByRole('alert').getByText('診断情報', { exact: true }).click();
+    const diagnostic = await dialog.getByLabel('診断情報', { exact: true }).inputValue();
+    expect(diagnostic).not.toMatch(/private|secret|fragment/);
+    expect(JSON.parse(diagnostic)).toMatchObject({ code: item.code, phase: item.phase });
+    expect(JSON.parse(diagnostic).context.httpStatus).toBe(item.status);
+  }
+});
+
+test('端末DBを開けない場合にも読込段階のエラーコードを表示する', async ({ page }) => {
+  await page.addInitScript(() => { Object.defineProperty(IDBFactory.prototype, 'open', { value() { throw new DOMException('blocked for this test', 'SecurityError'); } }); });
+  await page.goto(appPath);
+  await expect(page.getByRole('alert')).toContainText('DATA-2002');
+  await expect(page.getByRole('button', { name: '再読み込み', exact: true })).toBeVisible();
 });

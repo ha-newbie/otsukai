@@ -37,7 +37,11 @@ vite-plugin-pwaで静的資産をprecacheし、更新はユーザー操作で適
 
 ## レシピ取込・AI拡張
 
-`domain/recipe-input.ts`に保存入力型と厳格な取込スキーマを置く。`domain/recipe-import.ts`はJSON-LD抽出・Recipe解析・分離した材料名/分量の解析・AI回答検証の純粋関数。`domain/ingredient-category.ts`でグループ記号の除去と既知の調味料分類を行う。ドメインはUI/DB/DOMに依存しない。`services/cookpad-import.ts`が接続しないtemplate内でクックパッドの材料欄を抽出し、ドメインへ渡す。画面DOMへHTMLを挿入せず外部資産を読み込まない。`services/recipe-import.ts`は通常のCORS fetchのみを実行し、Cookie/転送/プロキシを使わず時間と受信量を制限する。確認・編集後だけrepositoryへ保存する。
+`domain/recipe-input.ts`に保存入力型と厳格な取込スキーマを置く。`domain/recipe-import.ts`はJSON-LD抽出・Recipe解析・分離した材料名/分量の解析・AI回答検証の純粋関数。`domain/ingredient-category.ts`でグループ記号の除去と既知の調味料分類を行う。ドメインはUI/DB/DOMに依存しない。`services/cookpad-import.ts`が接続しないtemplate内でクックパッドの材料欄を抽出し、ドメインへ渡す。画面DOMへHTMLを挿入せず外部資産を読み込まない。`services/recipe-import.ts`は通常のCORS fetchのみを実行し、Cookie/プロキシを使わず時間と受信量を制限する。確認・編集後だけrepositoryへ保存する。
+
+URL不具合の修正で、CORSを守る通常の転送を許可した。取得処理は端末ブラウザで動くため、Pagesを取得サーバーとして扱わない。`services/page-capture.ts`はSafari共有で元ページ上から材料だけを取得する自己完結コードを生成し、結果を厳格に検証する。通信やCookie読取はなく、PWAへ貼付後に通常の編集・保存へ渡す。
+
+`domain/errors.ts`が安定したコード・既定の意味・対処を定義し、通信/HTTP/解析/元ページ実行/保存を区別する。`services/diagnostics.ts`で観測したHTTP状態とビルドID等を整形し、query/hash/認証情報/本文をコピー診断から除外する。`ErrorBanner`を共通操作とモーダルに使用する。UI文言からコードを推定せず、予期しない失敗にもfallbackコードを付ける。[実行方法・コード規約](import-errors.md)参照。
 
 買い物の除外カテゴリは設定で管理し、初期値は調味料。レシピ・在庫の需要には残して在庫を割り当て、最後の買い物行だけから除く。手動品目は除外しない。設定変更でリストを自動更新せず、開始前の再集計か次回作成に適用し、active/completedのチェックを保護する。既存食材の共通カテゴリは設定からIDを保って修正できる。[取込・除外設計](cookpad-import.md)参照。
 

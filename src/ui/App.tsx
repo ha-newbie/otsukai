@@ -1,6 +1,8 @@
 import { useRef, useState } from 'react';
 import { useRegisterSW } from 'virtual:pwa-register/react';
-import { ZodError } from 'zod';
+import { describeError, type ErrorReport } from '../services/diagnostics';
+import { ErrorBanner } from './ErrorBanner';
+import { AppError } from '../domain/errors';
 import { monday } from '../domain/dates';
 import { repository } from '../persistence/repository';
 import { useAppData, useOnline } from './hooks';
@@ -24,7 +26,7 @@ export function App() {
   const online = useOnline();
   const [tab, setTab] = useState<Tab>('plan');
   const [week, setWeek] = useState(monday());
-  const [notice, setNotice] = useState<{ text: string; error: boolean } | null>(null);
+  const [notice, setNotice] = useState<{ text: string; error: boolean; report?: ErrorReport } | null>(null);
   const [pending, setPending] = useState(false);
   const lock = useRef(false);
   const { needRefresh: [needRefresh], offlineReady: [offlineReady], updateServiceWorker } = useRegisterSW();
@@ -33,20 +35,20 @@ export function App() {
     lock.current = true; setPending(true); setNotice(null);
     try { await operation(); if (message) setNotice({ text: message, error: false }); return true; }
     catch (cause) {
-      const text = cause instanceof ZodError ? `入力内容を確認してください：${cause.issues[0]?.message ?? '形式が正しくありません'}` : cause instanceof Error ? cause.message : '保存できませんでした。もう一度お試しください';
-      setNotice({ text, error: true }); return false;
+      const report = describeError(cause);
+      setNotice({ text: report.message, error: true, report }); return false;
     } finally { lock.current = false; setPending(false); }
   };
   const settings = data?.settings[0];
   const backupDue = data && (!settings?.lastBackupAt || Date.now() - new Date(settings.lastBackupAt).getTime() > (settings?.backupReminderDays ?? 7) * 86_400_000);
-  return <UIContext.Provider value={{ error: notice?.error ? notice.text : '', pending }}><div className="app-shell">
-    <header className="app-header"><a href="#" className="brand" onClick={event => { event.preventDefault(); setTab('plan'); }}><span className="brand-symbol"><Icon name="spoon" size={28} /></span><span>おつかい<span className="brand-caption">献立と買い物のノート</span></span></a><span className={`save-status ${online ? '' : 'offline'}`}><span />{pending ? '保存中…' : online ? 'この端末に保存' : 'オフライン'}</span></header>
+  return <UIContext.Provider value={{ error: notice?.error ? notice.text : '', pending, failure: notice?.report ?? null }}><div className="app-shell">
+    <header className="app-header"><a href="#" className="brand" onClick={event => { event.preventDefault(); setTab('plan'); }}><span className="brand-symbol"><Icon name="spoon" size={28} /></span><span>おつかい<span className="brand-caption">献立と買い物のノート</span></span></a><span className={`save-status ${online ? '' : 'offline'}`}><span />{pending ? '処理中…' : online ? 'この端末に保存' : 'オフライン'}</span></header>
     <div className="content-shell">
       <nav className="tab-bar" aria-label="メインメニュー">{tabs.map(item => <button key={item.id} aria-current={tab === item.id ? 'page' : undefined} className={tab === item.id ? 'selected' : ''} onClick={() => { setTab(item.id); setNotice(null); }}><Icon name={item.icon} /><span>{item.label}</span></button>)}</nav>
       <main aria-busy={pending}>
-        {error && <div className="banner error" role="alert">{error}<button className="text-button" onClick={() => window.location.reload()}>再読み込み</button></div>}
+        {error && <><ErrorBanner report={describeError(new AppError('DATA-2002', {}, error))} /><button className="button secondary" onClick={() => window.location.reload()}>再読み込み</button></>}
         {!data && !error && <div className="loading">献立ノートを開いています…</div>}
-        {notice && <div className={`banner ${notice.error ? 'error' : 'success'}`} role={notice.error ? 'alert' : 'status'}><span>{notice.text}</span><button aria-label="通知を閉じる" className="icon-button" onClick={() => setNotice(null)}>×</button></div>}
+        {notice?.report ? <ErrorBanner report={notice.report} onDismiss={() => setNotice(null)} /> : notice && <div className="banner success" role="status"><span>{notice.text}</span><button aria-label="通知を閉じる" className="icon-button" onClick={() => setNotice(null)}>×</button></div>}
         {needRefresh && <div className="banner"><span>新しいバージョンがあります。入力を保存してから更新してください。</span><button className="text-button" onClick={() => void action(async () => { await updateServiceWorker(true); })}>更新する</button></div>}
         {data && <>
           {tab === 'plan' && <PlanPage data={data} week={week} setWeek={setWeek} action={action} onRecipes={() => setTab('recipes')} onShopping={async () => { if (await action(() => repository.generateShopping(week), '献立から買い物リストを作成しました')) setTab('shopping'); }} />}

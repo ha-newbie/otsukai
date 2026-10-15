@@ -139,3 +139,38 @@ Playwrightは専用4180番ポートにテスト用の静的サーバーを起動
 | 文書/ライセンス | `README.md`, `AGENTS.md`, `LICENSE`, `docs/architecture.md`, `docs/roadmap.md`, `docs/backlog.md`, `docs/verification.md` |
 
 node_modules、dist、テスト結果、ローカルDBや認証情報はソース配布に含めない。
+
+## 指定URLの取得不具合と診断の修正（2026-10-15）
+
+対象: `https://cookpad.com/jp/recipes/18472521`。通常のHTTPS GETと、公開アプリのOriginを付けたGETでHTTP 200・HTML 250,629バイトを確認した。応答に`Access-Control-Allow-Origin`がなく、クックパッドの本文を別オリジンのPWAへ渡せないことが主因。サーバーから取得できたことを、PWAからの取得成功とは扱っていない。
+
+URL直接取得では通常のCORS対応転送を許可するよう修正した。クックパッドはURL入力時に制約とSafariのページ取込を案内する。初回のショートカット設定、元ページでの実行、ホーム画面アプリへ戻す手順を画面内に追加した。URLだけの自動取得は未対応のままで、プロキシ・`no-cors`・アクセス制限回避は追加していない。
+
+固定エラーコード29種、処理段階、対処、診断コピーを実装した。URL取得・HTTPエラー・取得後の解析・ページ実行・入力検証・DB読込を区別する。診断はビルドID・時刻・オンライン/表示状態・URLのorigin/path・観測できたHTTP状態/型のみで、query/fragment・認証情報・入力本文・自由文・stackを含めず、自動送信もしない。ブラウザから応答が見えないだけでCORSやHTTP状態を断定しない。
+
+| 検証 | 結果 |
+| --- | --- |
+| `npm run typecheck` | 成功 |
+| `npm test` | 9ファイル・91件成功 |
+| `BASE_PATH=/otsukai/ npm run build` | 成功。manifest・SW・404.htmlを生成 |
+| `BASE_PATH=/otsukai/ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:e2e` | モバイルChromium・18件すべて成功 |
+| `git diff --check` | 成功 |
+
+今回追加した画面検証:
+
+- 指定Cookpad URLで読取不可を模擬し、`IMP-2003`と処理段階を表示する。HTTP状態を捏造せず、手順へ移動できる。
+- 本番ビルドから配布用JavaScriptを取り出し、合成したクックパッドページで実行する。`completion`は1回、DOM変更・追加通信は0件。実行結果の検証→編集→保存→再読込まで確認する。グループ記号「◯」もこの経路で確認する。
+- 別ポートの実HTTPサーバーを使い、HTTP 200でもCORSヘッダーなしでは本文が読めないことと、CORSを許可した302転送後の読取成功をブラウザで確認する。Playwrightの応答差替だけをCORSの実証には使わない。
+- 読めるHTTP 403と、HTTP 200受信後の材料欠落を別コード・段階として表示し、診断からquery/fragmentを除く。
+- IndexedDBを開けない状態を注入し、`DATA-2002`と再読込操作を表示する。
+
+追加の実ページ検証では、対象ページの保存済みHTMLをUTF-8の正しいHTTP型でブラウザへ読み込み、**本番配布用コードで材料11件を抽出**した。6件が調味料の候補になり、元URLと出典を保持し、作り方は空欄で保存・再読込できた。人数「２～３人分」、半分・適量などは既存の注意/保留仕様を維持した。記号「◯」を除去する対象へ追加した。取得済みの実HTML・実レシピ本文はリポジトリやテストfixtureへ含めていない。回帰用fixtureは合成データ。
+
+既存の買い物チェック、在庫差引、バックアップv1→v2復元、オフライン再起動、Pagesのサブパス/直接URL/manifestも同じ18件で成功した。今回DB名・DBスキーマ・バックアップv2・保存項目・依存パッケージは変更していない。
+
+変更ファイル:
+
+- 追加: `src/domain/errors.ts`, `src/services/diagnostics.ts`, `src/services/diagnostics.test.ts`, `src/services/page-capture.ts`, `src/services/page-capture.test.ts`, `src/ui/ErrorBanner.tsx`, `src/ui/PageCaptureHelp.tsx`, `docs/import-errors.md`。
+- 変更: `src/domain/ingredient-category.ts`, `src/domain/ingredient-category.test.ts`, `src/domain/recipe-import.ts`, `src/domain/recipe-import.test.ts`, `src/services/cookpad-import.ts`, `src/services/recipe-import.ts`, `src/services/recipe-import.test.ts`, `src/ui/App.tsx`, `src/ui/RecipeImport.tsx`, `src/ui/SettingsPage.tsx`, `src/ui/components.tsx`, `src/ui/styles.css`, `tests/app.spec.ts`, `tests/pages-server.mjs`, `vite.config.ts`, `AGENTS.md`, `README.md`, `docs/ai-import.md`, `docs/architecture.md`, `docs/backlog.md`, `docs/cookpad-import.md`, `docs/roadmap.md`, `docs/verification.md`。
+
+実機iOSのショートカット作成・Safari共有・実行許可・クリップボード・ホーム画面アプリとの切替は未確認。Chromium上のJavaScript実行と保存の成功で、これらの実機操作まで保証しない。次の確認はiPhone上で初回設定から材料貼付までを通し、診断のビルドIDとエラーコードを記録すること。詳細手順と全コードは[import-errors.md](import-errors.md)を参照。
