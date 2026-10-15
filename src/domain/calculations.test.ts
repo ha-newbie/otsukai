@@ -23,6 +23,18 @@ describe('単位と人数', () => {
   it('名前の全角半角・空白を正規化する', () => { expect(normalizeName('  ＭＩＬＫ  ')).toBe('milk'); });
 });
 describe('献立の集計と在庫', () => {
+  it('調味料を買い物から除外しても、レシピと在庫の使用予定に残す', () => {
+    const data = fixture();
+    data.ingredients.push({ id: 'salt', name: '塩', normalizedName: '塩', categoryId: 'seasoning' });
+    data.recipes[0]!.ingredients.push({ ingredientId: 'salt', quantity: 2, unit: 'g' }, { ingredientId: 'salt', quantity: null, unit: '適量' });
+    data.pantry.push({ id: 'saltStock', ingredientId: 'salt', quantity: 10, unit: 'g', expiresOn: '' });
+    expect(shoppingLines(data, '2026-10-12', '2026-10-18', '2026-10-14').some(value => value.ingredientId === 'salt')).toBe(false);
+    expect(forecastPantry(data, '2026-10-14', '2026-10-18').get('saltStock')).toBe(6);
+    expect(data.recipes[0]!.ingredients).toHaveLength(3);
+    expect(data.pantry.find(value => value.id === 'saltStock')?.quantity).toBe(10);
+    data.settings = [{ ...defaultSettings, excludedShoppingCategoryIds: [] }];
+    expect(shoppingLines(data, '2026-10-12', '2026-10-18', '2026-10-14').filter(value => value.ingredientId === 'salt')).toHaveLength(2);
+  });
   it('複数日の需要から在庫を一度だけ引く', () => {
     const data = fixture();
     const lines = shoppingLines(data, '2026-10-12', '2026-10-18', '2026-10-14');

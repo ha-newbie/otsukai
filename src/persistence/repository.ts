@@ -144,5 +144,21 @@ export class Repository {
     });
   }
   async saveSettings(value: AppData['settings'][number]): Promise<void> { await this.database.settings.put(settingsSchema.parse(value)); }
+  async saveShoppingExclusions(categoryIds: string[]): Promise<void> {
+    await this.database.transaction('rw', [this.database.categories, this.database.settings], async () => {
+      const settings = await this.database.settings.get('app');
+      if (!settings) throw new Error('設定が見つかりません');
+      const updated = settingsSchema.parse({ ...settings, excludedShoppingCategoryIds: categoryIds });
+      for (const id of updated.excludedShoppingCategoryIds) if (!(await this.database.categories.get(id))) throw new Error('除外するカテゴリが見つかりません');
+      await this.database.settings.put(updated);
+    });
+  }
+  async setIngredientCategory(id: string, categoryId: string): Promise<void> {
+    await this.database.transaction('rw', [this.database.ingredients, this.database.categories], async () => {
+      if (!(await this.database.categories.get(categoryId))) throw new Error('食材カテゴリが見つかりません');
+      if (!(await this.database.ingredients.get(id))) throw new Error('食材が見つかりません');
+      await this.database.ingredients.update(id, { categoryId });
+    });
+  }
 }
 export const repository = new Repository();

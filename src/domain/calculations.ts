@@ -19,6 +19,10 @@ export interface ShoppingLine {
   ingredientId: string; unit: Unit; quantity: number | null;
   plannedQuantity: number | null; pantryQuantity: number;
 }
+export function excludedShoppingIngredients(data: AppData): Set<string> {
+  const categories = new Set(data.settings[0]?.excludedShoppingCategoryIds ?? []);
+  return new Set(data.ingredients.filter(value => categories.has(value.categoryId)).map(value => value.id));
+}
 export function requirements(data: AppData, from: string, through: string): Need[] {
   const recipes = new Map(data.recipes.map(recipe => [recipe.id, recipe]));
   const servingsByDate = new Map(data.days.map(day => [day.id, day.servings]));
@@ -66,9 +70,11 @@ export function allocateNeeds(needs: Need[], pantry: PantryStock[]): { lines: Ma
 /** Prior upcoming meals reserve stock before the selected week's needs. */
 export function shoppingLines(data: AppData, startsOn: string, endsOn: string, today: string): ShoppingLine[] {
   const allocation = allocateNeeds(requirements(data, today, endsOn), data.pantry);
+  const excluded = excludedShoppingIngredients(data);
   const result = new Map<string, ShoppingLine>();
   for (const [datedKey, line] of allocation.lines) {
     if (datedKey.slice(0, 10) < startsOn) continue;
+    if (excluded.has(line.ingredientId)) continue;
     const key = `${line.ingredientId}|${line.unit}`;
     const previous = result.get(key);
     result.set(key, {

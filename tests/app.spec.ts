@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { dateLabel, localDate } from '../src/domain/dates';
+import { addDays, dateLabel, localDate, monday } from '../src/domain/dates';
+import { defaultCategories } from '../src/domain/models';
 const appPath = process.env.BASE_PATH ?? '/';
 
 async function tab(page: Page, name: string) { await page.getByRole('navigation').getByRole('button', { name, exact: true }).click(); }
@@ -76,7 +77,7 @@ test('レシピ → 献立 → 在庫差引 → 買い物 → 購入反映 → �
   const path = await download.path();
   const buffer = await readFile(path!);
   const saved = JSON.parse(buffer.toString()) as { schemaVersion: number; data: { pantry: unknown[]; shoppingItems: { checked: boolean }[] } };
-  expect(saved.schemaVersion).toBe(1); expect(saved.data.pantry).toHaveLength(3);
+  expect(saved.schemaVersion).toBe(2); expect(saved.data.pantry).toHaveLength(3);
   expect(saved.data.shoppingItems.every(item => item.checked)).toBe(true);
   await tab(page, 'レシピ');
   await page.getByRole('button').filter({ has: page.getByRole('heading', { name: 'にんじんスープ' }) }).click();
@@ -274,4 +275,105 @@ test('ホーム画面用manifestとiOSアイコンがアプリのbase内で取�
   const touchIcon = await page.locator('link[rel="apple-touch-icon"]').getAttribute('href');
   expect(touchIcon).toBe(`${appPath}apple-touch-icon.png`);
   expect((await request.get(touchIcon!)).status()).toBe(200);
+});
+
+test('クックパッドのHTMLから材料だけを抽出し、調味料を保存して買い物から除外する', async ({ page, context }) => {
+  const requests: string[] = [];
+  page.on('request', request => { if (request.url().includes('cookpad.example.test')) requests.push(request.url()); });
+  await page.goto(appPath);
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)), { timeout: 20000 }).toBe(true);
+  await context.setOffline(true);
+  const dialog = await openImport(page);
+  await expect(dialog.getByLabel('材料だけを取り込む（作り方は保存しない）')).toBeChecked();
+  await dialog.getByRole('button', { name: 'HTML・JSON', exact: true }).click();
+  await dialog.getByLabel('取り込むHTML・JSONファイル').setInputFiles('tests/fixtures/cookpad-ingredients.html');
+  await expect(dialog.getByLabel('料理名', { exact: true })).toHaveValue('取込テストの野菜煮');
+  await expect(dialog.getByLabel('材料2の食材名')).toHaveValue('しょうゆ');
+  await expect(dialog.getByLabel('材料2の数量')).toHaveValue('0.5');
+  await expect(dialog.getByLabel('材料2のカテゴリ')).toHaveValue('seasoning');
+  await expect(dialog.getByLabel('材料3の食材名')).toHaveValue('塩');
+  await expect(dialog.getByLabel('材料4の食材名')).toHaveValue('ご飯');
+  await expect(dialog.getByLabel('作り方')).toHaveValue('');
+  await expect(dialog.getByLabel('出典')).toHaveValue('クックパッド / テスト作者');
+  await expect(dialog.getByLabel('元レシピのURL')).toHaveValue('https://cookpad.com/jp/recipes/999000001');
+  await expect(dialog.getByLabel('材料5の食材名')).toHaveCount(0);
+  expect(await page.evaluate(() => 'cookpadImportExecuted' in window)).toBe(false);
+  expect(requests).toEqual([]);
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await page.screenshot({ path: 'test-results/cookpad-import-mobile.png' });
+  await dialog.getByRole('button', { name: 'この内容で保存する' }).click();
+  await expect(dialog).not.toBeVisible();
+  await meal(page);
+  await page.getByRole('button', { name: '買い物リストを作成', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'にんじんを購入チェック' })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'しょうゆを購入チェック' })).toHaveCount(0);
+  await expect(page.getByRole('checkbox', { name: '塩を購入チェック' })).toHaveCount(0);
+  await tab(page, '設定');
+  const exclusion = page.getByRole('checkbox', { name: '調味料を買い物集計から除外' });
+  await expect(exclusion).toBeChecked();
+  await exclusion.click(); await expect(exclusion).not.toBeChecked();
+  await tab(page, '買い物');
+  await expect(page.getByRole('checkbox', { name: 'しょうゆを購入チェック' })).toHaveCount(0);
+  await page.getByRole('button', { name: '献立から再集計', exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: 'しょうゆを購入チェック' })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: '塩を購入チェック' })).toBeVisible();
+  await page.getByRole('checkbox', { name: 'にんじんを購入チェック' }).click();
+  await expect(page.getByRole('checkbox', { name: 'にんじんを購入チェック' })).toBeChecked();
+  await tab(page, '設定');
+  await exclusion.click(); await expect(exclusion).toBeChecked();
+  await page.getByText('登録済み食材のカテゴリを変更', { exact: true }).click();
+  await page.getByLabel('にんじんの共通カテゴリ').selectOption('vegetable');
+  await expect(page.getByLabel('にんじんの共通カテゴリ')).toHaveValue('vegetable');
+  await tab(page, '買い物');
+  await expect(page.getByRole('checkbox', { name: 'しょうゆを購入チェック' })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: 'にんじんを購入チェック' })).toBeChecked();
+  await expect(page.getByRole('button', { name: 'にんじんの購入数量を調整' })).toHaveText('200 g');
+  await page.reload(); await tab(page, '買い物');
+  await expect(page.getByRole('checkbox', { name: 'にんじんを購入チェック' })).toBeChecked();
+  await tab(page, 'レシピ');
+  await page.getByRole('button').filter({ has: page.getByRole('heading', { name: '取込テストの野菜煮', exact: true }) }).click();
+  await expect(page.getByRole('dialog')).toContainText('しょうゆ');
+  await expect(page.getByRole('dialog')).toContainText('材料だけのレシピです。');
+  await context.setOffline(false);
+});
+
+test('クックパッドの材料欄がない・壊れているHTMLを誤って保存しない', async ({ page }) => {
+  await page.goto(appPath);
+  const dialog = await openImport(page);
+  await dialog.getByLabel('元レシピのURL').fill('https://cookpad.com/jp/recipes/999000001');
+  await dialog.getByRole('button', { name: 'HTML・JSON', exact: true }).click();
+  for (const html of ['<h1>ログイン画面</h1><p>材料はありません</p>', '<h1>材料が欠落</h1><section id="ingredients"><li id="ingredient_1"><bdi>100g</bdi></li></section>']) {
+    await dialog.getByLabel('HTML・構造化JSON', { exact: true }).fill(html);
+    await dialog.getByRole('button', { name: '構造化データを解析する' }).click();
+    await expect(dialog.getByRole('alert')).toContainText('材料');
+    await expect(dialog.getByRole('button', { name: 'この内容で保存する' })).toHaveCount(0);
+  }
+  await dialog.getByLabel('元レシピのURL').fill('https://cookpad.com/jp/recipes/999000001-test');
+  await dialog.getByLabel('HTML・構造化JSON', { exact: true }).fill('<h1>材料だけの断片</h1><section id="ingredients"><li id="ingredient_1"><span>塩</span><bdi>適量</bdi></li></section>');
+  await dialog.getByRole('button', { name: '構造化データを解析する' }).click();
+  await expect(dialog.getByLabel('料理名', { exact: true })).toHaveValue('材料だけの断片');
+  await expect(dialog.getByLabel('材料1のカテゴリ')).toHaveValue('seasoning');
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'あなたの定番を、ここに。' })).toBeVisible();
+});
+
+test('v1バックアップを復元しても、除外対象の調味料の購入チェックを保護する', async ({ page }) => {
+  const start = monday();
+  const legacy = { app: 'kosaji', schemaVersion: 1, exportedAt: new Date().toISOString(), data: {
+    categories: defaultCategories, ingredients: [{ id: 'salt', name: '塩', normalizedName: '塩', categoryId: 'seasoning' }], recipes: [], meals: [], days: [],
+    pantry: [{ id: 'stock', ingredientId: 'salt', quantity: 10, unit: 'g', expiresOn: '' }],
+    trips: [{ id: 'trip', startsOn: start, endsOn: addDays(start, 6), status: 'active', createdAt: new Date().toISOString(), mealIds: [] }],
+    shoppingItems: [{ id: 'item', ingredientId: 'salt', tripId: 'trip', quantity: 2, unit: 'g', plannedQuantity: 2, pantryQuantity: 0, quantityOverride: null, checked: true, source: 'plan' }],
+    settings: [{ id: 'app', defaultServings: 2, lastBackupAt: '', backupReminderDays: 7 }],
+  } };
+  await page.goto(appPath); await tab(page, '設定');
+  await page.getByLabel('復元するバックアップファイル').setInputFiles({ name: 'legacy-v1.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(legacy)) });
+  await page.getByRole('dialog').getByRole('button', { name: '実行する', exact: true }).click();
+  await expect(page.getByRole('dialog')).not.toBeVisible();
+  await expect(page.getByRole('checkbox', { name: '調味料を買い物集計から除外' })).toBeChecked();
+  await tab(page, '買い物');
+  await expect(page.getByRole('checkbox', { name: '塩を購入チェック' })).toBeChecked();
+  await expect(page.getByRole('button', { name: '塩の購入数量を調整' })).toHaveText('2 g');
+  await page.reload(); await tab(page, '買い物');
+  await expect(page.getByRole('checkbox', { name: '塩を購入チェック' })).toBeChecked();
 });

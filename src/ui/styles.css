@@ -225,6 +225,8 @@ form > .button.full:last-child { margin-bottom: 0; }
 .import-notice p, .import-notice li { font-size: 14px; line-height: 1.8; }
 .import-notice ul, .original-ingredients { list-style: disc; padding-left: 22px; margin-top: 10px; }
 .original-ingredients { overflow-wrap: anywhere; }
+.preferences-fields { border: 0; padding: 0; margin: 12px 0; min-width: 0; }
+.preferences-fields .checkbox-label { display: flex; }
 
 @media (min-width: 1200px) { .day-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
 @media (max-width: 1000px) { .content-shell { grid-template-columns: 135px minmax(0, 1fr); gap: 24px; padding-left: 24px; padding-right: 24px; } .app-header { padding-left: 24px; padding-right: 24px; } .recipe-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } .plan-summary { padding: 20px; } }

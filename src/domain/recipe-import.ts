@@ -1,9 +1,10 @@
 import type { Unit } from './models';
 import { manualRecipeSchema, type IngredientInput, type RecipeInput } from './recipe-input';
+import { ingredientName, suggestedCategory } from './ingredient-category';
 
 export const MAX_IMPORT_BYTES = 2 * 1024 * 1024;
 export const MAX_AI_RESPONSE_BYTES = 100_000;
-export interface ImportContext { sourceUrl?: string; source?: string; defaultServings?: number; }
+export interface ImportContext { sourceUrl?: string; source?: string; defaultServings?: number; ingredientsOnly?: boolean; }
 export interface ImportedRecipe { recipe: RecipeInput; warnings: string[]; originalIngredients: string[]; originalYield: string; }
 type RecordValue = Record<string, unknown>;
 const record = (value: unknown): RecordValue | undefined => value !== null && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : undefined;
@@ -45,6 +46,7 @@ export function parseAIRecipeAnswer(answer: string, context: ImportContext = {})
   const recipe = checkedRecipe(parsed);
   recipe.sourceUrl = importSourceUrl(context.sourceUrl?.trim() || recipe.sourceUrl);
   recipe.source = context.source?.trim() || recipe.source;
+  if (context.ingredientsOnly) recipe.steps = '';
   return { recipe: checkedRecipe(recipe), warnings: ['AIが整理した人数・数量・出典を元レシピと照合してください。'], originalIngredients: [], originalYield: '' };
 }
 
@@ -80,6 +82,13 @@ export function parseIngredientLine(line: string): { ingredient: IngredientInput
   return { ingredient: { name, quantity: amount, unit, categoryId: 'other' }, uncertain: false };
 }
 
+/** HTML often gives us an explicit food name and a separate amount. Keep them separate. */
+export function parseIngredientParts(name: string, amount: string): { ingredient: IngredientInput; uncertain: boolean } {
+  const cleanName = ingredientName(text(name));
+  const parsed = parseIngredientLine(`${cleanName} ${text(amount)}`);
+  return { ingredient: { ...parsed.ingredient, name: cleanName, categoryId: suggestedCategory(cleanName) }, uncertain: parsed.uncertain && text(amount) !== '適量' };
+}
+
 function instructions(value: unknown, depth = 0): string[] {
   if (depth > 20) throw new Error('手順の入れ子が深すぎます');
   if (Array.isArray(value)) return value.flatMap(item => instructions(item, depth + 1));
@@ -108,12 +117,19 @@ function convertRecipe(node: RecordValue, context: ImportContext): ImportedRecip
   const warnings: string[] = [];
   const list = Array.isArray(node.recipeIngredient) ? node.recipeIngredient : record(node.recipeIngredient)?.itemListElement;
   if (!Array.isArray(list) || !list.length || list.length > 100) throw new Error('材料は1〜100件の一覧が必要です');
-  const originalIngredients = list.map(item => text(record(item)?.text ?? record(item)?.name ?? item));
+  const originalIngredients = list.map(item => {
+    const part = record(item);
+    return part?.['@type'] === 'PropertyValue' ? `${text(part.name)} ${text(part.value)}${text(part.unitText)}`.trim() : text(part?.text ?? part?.name ?? item);
+  });
   if (originalIngredients.some(line => !line)) throw new Error('対応していない材料形式が含まれています。本文をChatGPTで整理してください');
-  const ingredients = originalIngredients.map(line => {
-    const parsed = parseIngredientLine(line);
+  const ingredients = originalIngredients.map((line, index) => {
+    const part = record(list[index]);
+    const parsed = part?.['@type'] === 'PropertyValue'
+      ? parseIngredientParts(text(part.name), `${text(part.value)}${text(part.unitText)}`)
+      : parseIngredientLine(line);
     if (parsed.uncertain) warnings.push(`数量を確認：「${line}」は適量として取り込みます。`);
-    return parsed.ingredient;
+    const name = ingredientName(parsed.ingredient.name);
+    return { ...parsed.ingredient, name, categoryId: suggestedCategory(name) };
   });
   const count = servings(node.recipeYield);
   const originalYield = Array.isArray(node.recipeYield) ? node.recipeYield.map(item => text(record(item)?.value ?? item)).join(' / ') : text(record(node.recipeYield)?.value ?? node.recipeYield);
@@ -125,7 +141,7 @@ function convertRecipe(node: RecordValue, context: ImportContext): ImportedRecip
   }
   const attribution = [entityName(node.publisher), entityName(node.author)].filter(Boolean);
   const source = context.source?.trim() || [...new Set(attribution)].join(' / ') || (sourceUrl ? new URL(sourceUrl).hostname : '');
-  const recipe = checkedRecipe({ title: text(node.name), servings: count ?? context.defaultServings ?? 2, ingredients, steps: instructions(node.recipeInstructions).join('\n'), source, sourceUrl });
+  const recipe = checkedRecipe({ title: text(node.name), servings: count ?? context.defaultServings ?? 2, ingredients, steps: context.ingredientsOnly ? '' : instructions(node.recipeInstructions).join('\n'), source, sourceUrl });
   return { recipe, warnings, originalIngredients, originalYield };
 }
 

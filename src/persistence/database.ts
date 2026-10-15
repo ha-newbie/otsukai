@@ -19,6 +19,11 @@ export class KosajiDB extends Dexie {
       meals: 'id, recipeId, date, [date+slot]', days: 'id', pantry: 'id, ingredientId, expiresOn',
       trips: 'id, &startsOn, status', shoppingItems: 'id, tripId, ingredientId', settings: 'id',
     });
+    this.version(2).stores({}).upgrade(async transaction => {
+      const hasSeasoning = Boolean(await transaction.table('categories').get('seasoning'));
+      await transaction.table('settings').toCollection().modify(value => { value.excludedShoppingCategoryIds = hasSeasoning ? ['seasoning'] : []; });
+      // Preserve every recipe, pantry lot and shopping snapshot, including checks.
+    });
     this.on('populate', async () => {
       await this.categories.bulkAdd(defaultCategories);
       await this.settings.add(defaultSettings);

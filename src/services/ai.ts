@@ -16,9 +16,9 @@ export function recipePrompt(text: string, context: ImportContext = {}): string 
 URLにアクセスできない場合は本文の貼り付けを依頼してください。アクセス制限やログインを回避しないでください。
 人数が不明なら先に質問してください。記載のない材料や数量は作らず、曖昧な数量・換算できない単位は元の表記をnameに残し、quantity:null, unit:"適量"にしてください。重量・体積・個数を推測で相互換算しないでください。
 人数は1〜100の整数、材料は1〜100件、quantityは0以上1000000以下の数値またはnull。適量のときだけnullにします。
-categoryIdはvegetable/meat/dairy/staple/seasoning/other。不明ならother。
+categoryIdはvegetable/meat/dairy/staple/seasoning/other。塩・砂糖・しょうゆ等の調味料はseasoningとして残し、それ以外で不明ならother。材料から調味料を削除しないでください。
 単位はg/kg/ml/L/個/本/枚/束/袋/缶/パック/大さじ/小さじ/適量。
-手順は自分用の短い要約。出典・著者・元URLを保持してください。追加のキーやIDは不要です。
+${context.ingredientsOnly ? '使用する材料だけを抽出し、stepsは空文字にしてください。本文内の作り方、広告、関連記事、コメントから材料を追加しないでください。' : '手順は自分用の短い要約。'}出典・著者・元URLを保持してください。追加のキーやIDは不要です。
 形式: {"title":"料理名","servings":2,"ingredients":[{"name":"食材名","quantity":100,"unit":"g","categoryId":"vegetable"}],"steps":"手順","source":"出典","sourceUrl":"https://example.com/recipe"}
 入力データ(JSON):
 ${JSON.stringify({ sourceUrl: context.sourceUrl ?? '', source: context.source ?? '', text })}`;

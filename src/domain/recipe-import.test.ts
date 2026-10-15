@@ -18,6 +18,17 @@ describe('推測しない材料解析', () => {
 });
 
 describe('Recipe構造化データの取込', () => {
+  it('材料だけの指定では作り方を保存せず、調味料は残す', () => {
+    const result = parseStructuredRecipes(JSON.stringify(recipe), { ingredientsOnly: true })[0]!;
+    expect(result.recipe.steps).toBe('');
+    expect(result.recipe.ingredients.find(value => value.name === '塩')).toMatchObject({ quantity: null, categoryId: 'seasoning' });
+    expect(parseAIRecipeAnswer(JSON.stringify({ ...answer, steps: '保存しない作り方' }), { ingredientsOnly: true }).recipe.steps).toBe('');
+  });
+  it('名前と分量が分離した材料を扱い、元表記は確認用に残す', () => {
+    const result = parseStructuredRecipes(JSON.stringify({ ...recipe, recipeIngredient: [{ '@type': 'PropertyValue', name: 'ご飯', value: '茶碗1杯' }, { '@type': 'PropertyValue', name: '●しょうゆ', value: 1, unitText: '大さじ' }] }))[0]!;
+    expect(result.recipe.ingredients).toEqual([{ name: 'ご飯', quantity: null, unit: '適量', categoryId: 'other' }, { name: 'しょうゆ', quantity: 1, unit: '大さじ', categoryId: 'seasoning' }]);
+    expect(result.originalIngredients).toEqual(['ご飯 茶碗1杯', '●しょうゆ 1大さじ']);
+  });
   it('HTMLのJSON-LD、@graph、手順の節と出典を取り込む', () => {
     const html = `<html><script>alert('実行しない');</script><img src="https://example.com/tracker"><script type="application/ld+json">${JSON.stringify({ '@graph': [recipe] })}</script></html>`;
     const result = parseStructuredRecipes(html)[0]!;

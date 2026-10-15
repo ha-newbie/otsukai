@@ -5,6 +5,7 @@ import { repository } from '../persistence/repository';
 import { MAX_BACKUP_BYTES, parseBackup, restoreBackup, serializeBackup, validateBackup, type Backup } from '../persistence/backup';
 import { downloadFile, requestPersistence, saveBackupFile, storageStatus, type StorageStatus } from '../services/storage';
 import { Confirm, Icon, type Action } from './components';
+import { ShoppingPreferences } from './ShoppingPreferences';
 
 export function SettingsPage({ data, action, offlineReady }: { data: AppData; action: Action; offlineReady: boolean }) {
   const settings = data.settings[0] ?? defaultSettings;
@@ -26,6 +27,7 @@ export function SettingsPage({ data, action, offlineReady }: { data: AppData; ac
   const installed = window.matchMedia('(display-mode: standalone)').matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
   return <>
     <div className="page-heading"><div><p className="eyebrow">大切なノートを、長く使うために。</p><h1>設定</h1><p className="subtle">データはこの端末のブラウザに保存しています。</p></div></div>
+    <ShoppingPreferences data={data} action={action} />
     <section className="settings-card"><div className="settings-title"><span className="settings-icon"><Icon name="book" /></span><div><h2>バックアップ</h2><p>端末の故障やブラウザのデータ削除に備えて。</p></div></div>
       <div className="settings-stat"><span>最後に保存操作をした日時</span><strong>{settings.lastBackupAt ? new Date(settings.lastBackupAt).toLocaleString('ja-JP') : 'まだ保存していません'}</strong></div>
       <p className="help-text">iPhoneでは共有メニューの「ファイルに保存」からiCloud Driveなどを選べます。自動保存は行いません。ダウンロード後はファイルが保存されたことを確認してください。</p>

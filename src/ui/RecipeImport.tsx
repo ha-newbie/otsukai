@@ -1,10 +1,12 @@
 import { useRef, useState, type FormEvent } from 'react';
 import type { AppData } from '../domain/models';
-import { importSourceUrl, MAX_IMPORT_BYTES, parseAIRecipeAnswer, parseStructuredRecipes, type ImportedRecipe } from '../domain/recipe-import';
+import { importSourceUrl, MAX_IMPORT_BYTES, parseAIRecipeAnswer, type ImportedRecipe } from '../domain/recipe-import';
 import { manualRecipeSchema, type RecipeInput } from '../domain/recipe-input';
 import { repository } from '../persistence/repository';
 import { recipePrompt } from '../services/ai';
 import { fetchRecipePage } from '../services/recipe-import';
+import { parseRecipeDocument } from '../services/cookpad-import';
+import { normalizeName } from '../domain/models';
 import { Modal, type Action } from './components';
 import { RecipeFields } from './RecipeFields';
 
@@ -16,15 +18,18 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
   const [text, setText] = useState('');
   const [json, setJSON] = useState('');
   const [structured, setStructured] = useState('');
+  const [ingredientsOnly, setIngredientsOnly] = useState(true);
   const [candidates, setCandidates] = useState<ImportedRecipe[]>([]);
   const [selected, setSelected] = useState(0);
   const [draft, setDraft] = useState<RecipeInput | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
-  const context = { sourceUrl, source, defaultServings: data.settings[0]?.defaultServings ?? 2 };
+  const context = { sourceUrl, source, defaultServings: data.settings[0]?.defaultServings ?? 2, ingredientsOnly };
   const showCandidates = (values: ImportedRecipe[]) => {
-    setCandidates(values); setSelected(0); setDraft(values[0]?.recipe ?? null);
+    const currentCategories = new Map(data.ingredients.map(value => [value.normalizedName, value.categoryId]));
+    const adjusted = values.map(value => ({ ...value, recipe: { ...value.recipe, ingredients: value.recipe.ingredients.map(item => ({ ...item, categoryId: currentCategories.get(normalizeName(item.name)) ?? item.categoryId })) } }));
+    setCandidates(adjusted); setSelected(0); setDraft(adjusted[0]?.recipe ?? null);
   };
-  const loadStructured = (input: string) => showCandidates(parseStructuredRecipes(input, context));
+  const loadStructured = (input: string) => showCandidates(parseRecipeDocument(input, context));
   const copyPrompt = () => void action(async () => {
     if (!text.trim() && !sourceUrl.trim()) throw new Error('元レシピのURLか本文を入力してください');
     importSourceUrl(sourceUrl);
@@ -48,6 +53,7 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
         const index = Number(event.target.value); setSelected(index); setDraft(candidates[index]!.recipe);
       }}>{candidates.map((candidate, index) => <option key={index} value={index}>{candidate.recipe.title}</option>)}</select></label>}
       <div className="import-notice"><h3>{draft.title}（{draft.servings}人分）</h3><p>まだ保存されていません。元レシピと照合し、必要な項目を直して保存してください。</p>
+        <p>調味料も保存します。買い物からの除外は「設定」の「買い物の集計」で管理します。登録済み食材のカテゴリ変更も設定で行えます。</p>
         {!!chosen?.warnings.length && <ul>{chosen.warnings.map((warning, index) => <li key={index}>{warning}</li>)}</ul>}
       </div>
       {!!chosen?.originalIngredients.length && <details><summary>元の材料表記を確認</summary><ul className="original-ingredients">{chosen.originalIngredients.map((line, index) => <li key={index}>{line}</li>)}</ul>{chosen.originalYield && <p className="help-text">元の分量：{chosen.originalYield}</p>}</details>}
@@ -56,6 +62,7 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
       <p className="subtle">元サイトの利用条件を守り、自分用のレシピとして取り込みます。取得・解析だけでは保存されません。</p>
       <label>元レシピのURL <span className="optional">任意</span><input type="url" maxLength={2000} value={sourceUrl} placeholder="https://…" onChange={event => setSourceUrl(event.target.value)} /></label>
       <label>出典 <span className="optional">任意</span><input maxLength={200} value={source} placeholder="サイト名・作者名" onChange={event => setSource(event.target.value)} /></label>
+      <label className="checkbox-label"><input type="checkbox" checked={ingredientsOnly} onChange={event => setIngredientsOnly(event.target.checked)} />材料だけを取り込む（作り方は保存しない）</label>
       <div className="import-methods" role="group" aria-label="取込方法">
         <button aria-pressed={method === 'url'} onClick={() => setMethod('url')}>URL</button><button aria-pressed={method === 'ai'} onClick={() => setMethod('ai')}>本文・AI</button><button aria-pressed={method === 'structured'} onClick={() => setMethod('structured')}>HTML・JSON</button>
       </div>
@@ -75,7 +82,7 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
         <p className="help-text">このPWAでのSign in with ChatGPTは未対応です。ChatGPT自身へのログインで手動連携でき、APIキーは不要です。</p>
       </section>}
       {method === 'structured' && <section>
-        <h3>HTML・構造化JSONを読み込む</h3><p className="help-text">元ページのHTMLかschema.orgのRecipe JSONを貼り付ける、またはファイルを選択します。端末内で解析するのでオフラインでも使えます。本文だけの場合は「本文・AI」を選んでください。</p>
+        <h3>HTML・構造化JSONを読み込む</h3><p className="help-text">クックパッドは元ページのHTMLから材料欄を読み取れます。HTMLかschema.orgのRecipe JSONを貼り付ける、またはファイルを選択してください。端末内で解析するのでオフラインでも使えます。本文だけの場合は「本文・AI」を選びます。</p>
         <input hidden ref={fileInput} type="file" accept=".html,.htm,.json,text/html,application/json,application/ld+json" aria-label="取り込むHTML・JSONファイル" onChange={event => {
           const file = event.target.files?.[0]; event.target.value = '';
           if (file) void action(async () => {
@@ -84,7 +91,7 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
           }, '内容を確認して保存してください');
         }} />
         <button className="button secondary full" onClick={() => fileInput.current?.click()}>HTML・JSONファイルを選択</button>
-        <label>HTML・構造化JSON<textarea rows={7} maxLength={MAX_IMPORT_BYTES} value={structured} onChange={event => setStructured(event.target.value)} /></label>
+        <label>HTML・構造化JSON<textarea aria-label="HTML・構造化JSON" rows={7} maxLength={MAX_IMPORT_BYTES} value={structured} onChange={event => setStructured(event.target.value)} /></label>
         <button className="button primary full" disabled={!structured.trim()} onClick={() => void action(async () => loadStructured(structured), '内容を確認して保存してください')}>構造化データを解析する</button>
       </section>}
     </>}

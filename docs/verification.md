@@ -1,5 +1,34 @@
 # MVP実装・検証報告
 
+## 最新: クックパッド材料取込・調味料除外（2026-10-15）
+
+クックパッドのHTMLの材料欄から、名前と分量を分離して読み取る処理を追加。「材料だけを取り込む」を初期状態で有効にし、調味料もレシピに保存する。設定の「買い物の集計」で除外カテゴリを選べ、初期値は調味料。登録済み食材の共通カテゴリ修正も同じ設定から行う。
+
+買い物の除外は生成・開始前の明示的な再集計だけに反映する。在庫の使用予定には残し、直接追加した調味料、開始後/完了後の品目・数量・チェックを保護する。DB/バックアップはv2へ更新。旧v1は検証・移行して保持/復元する。DB名と既存のレシピ・在庫・購入チェックは維持する。
+
+| 検証 | 結果 |
+| --- | --- |
+| `npm run typecheck` | 成功 |
+| `npm test` | 7ファイル・80件成功 |
+| `BASE_PATH=/otsukai/ npm run build` | 成功。manifest・Service Worker・404.htmlを生成 |
+| `BASE_PATH=/otsukai/ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:e2e` | 13件すべて成功 |
+| 実際の公開ページを一時保存したHTMLの追加画面確認 | 7食材を抽出、作り方なし、元URL保持、保存成功、解析中の外部リクエスト0件 |
+
+追加の単体検証: 材料名/分量の分離、グループ記号除去、調味料の候補と部分一致の誤除外防止、材料だけのJSON/AI回答取込、調味料除外と在庫予定の両立、直接購入品の保護、開始後/完了後の設定変更保護、除外カテゴリ参照、v1バックアップ移行/v2往復、実際のv1 IndexedDBからのv2アップグレードと再起動時の設定保持。
+
+追加画面検証: 自作Cookpad構造fixtureのオフライン取込→名前/数量/出典確認→保存→献立→調味料の除外→設定解除→開始前の再集計→購入チェック→設定再変更→再読込。不正な材料欄や欠落行の保存防止、URLにslugがあるHTML断片、v1バックアップ復元後の調味料チェック保護も確認。HTMLのスクリプト・画像・CSS・iframeを実行/読込せず、モバイル幅も確認した。入力更新後も正しい名前で操作できるよう、HTML欄のaria-labelを明示した。
+
+実ページのHTML構造・CORSヘッダーは[公開レシピ](https://cookpad.com/jp/recipes/20843981)で確認した。CORS許可ヘッダーはなく、PWAからの直接取得を保証しない。保存HTMLは一時ファイルのみで、GitHub/fixtureに実レシピ本文・写真を含めない。サーバー/AI API/解析ライブラリを追加していない。
+
+ビルドは成功するが、既存Zodコードの注釈警告に加え、単一JSバンドルが約502KBで500KBの目安を超える警告がある（gzip約157KB）。将来の機能追加時に分割を検討する。iOS実機でのHTML準備・貼付・ファイル選択・更新時のデータ保持、すべてのCookpad HTML版、有料/ログインページは未確認。食材単位・レシピ材料単位の除外フラグは未実装。
+
+今回の変更ファイル:
+
+- 追加: `src/domain/ingredient-category.ts`, `src/domain/ingredient-category.test.ts`, `src/services/cookpad-import.ts`, `src/persistence/database.test.ts`, `src/ui/ShoppingPreferences.tsx`, `tests/fixtures/cookpad-ingredients.html`, `docs/cookpad-import.md`。
+- 変更: `src/domain/models.ts`, `src/domain/calculations.ts`, `src/domain/calculations.test.ts`, `src/domain/recipe-import.ts`, `src/domain/recipe-import.test.ts`, `src/persistence/database.ts`, `src/persistence/backup.ts`, `src/persistence/repository.ts`, `src/persistence/repository.test.ts`, `src/services/ai.ts`, `src/ui/RecipeImport.tsx`, `src/ui/SettingsPage.tsx`, `src/ui/ShoppingPage.tsx`, `src/ui/styles.css`, `tests/app.spec.ts`, `README.md`, `docs/architecture.md`, `docs/ai-import.md`, `docs/roadmap.md`, `docs/backlog.md`, `docs/verification.md`。
+
+詳細は[cookpad-import.md](cookpad-import.md)。次は実使用するHTML・iOS操作と除外設定の使い勝手を確認する。以下は以前の実装・公開時点の記録。
+
 実装日: 2026-10-14。作業先: `/workspace/otsukai`。既存ソース・リポジトリがなかったため、mainブランチのローカルGitリポジトリを新規作成した。
 
 名称を「おつかい」に変更。画面・ブラウザタイトル・PWA・共有タイトル・バックアップファイル名・ドキュメントとnpmパッケージ名（otsukai）へ反映し、プロジェクトのディレクトリ名も`otsukai`に変更した。データ形式v1の識別子とIndexedDB名は`kosaji`を保持し、既存データとバックアップを引き続き利用できる。

@@ -21,6 +21,35 @@ async function prepare() {
   return { recipe, trip: (await database.trips.toArray())[0]!, item: (await database.shoppingItems.toArray())[0]! };
 }
 describe('保存と買い物トランザクション', () => {
+  it('除外は開始前の再集計で反映し、直接追加した調味料は残す', async () => {
+    await repo.saveShoppingExclusions([]);
+    await repo.saveRecipe({ ...input, ingredients: [...input.ingredients, { name: '塩', quantity: 2, unit: 'g', categoryId: 'seasoning' }] });
+    const recipe = (await database.recipes.toArray())[0]!;
+    await repo.saveMeal({ recipeId: recipe.id, date: today, slot: 'dinner' });
+    await repo.generateShopping(week);
+    expect(await database.shoppingItems.count()).toBe(2);
+    await repo.addShopping({ name: '塩', quantity: 1, unit: '袋', categoryId: 'seasoning' }, week);
+    const before = await database.snapshot();
+    await repo.saveShoppingExclusions(['seasoning']);
+    expect(await database.shoppingItems.toArray()).toEqual(before.shoppingItems);
+    await repo.generateShopping(week);
+    const items = await database.shoppingItems.toArray();
+    expect(items).toHaveLength(2);
+    expect(items.filter(value => value.source === 'manual')).toHaveLength(1);
+    expect(await database.recipes.get(recipe.id)).toEqual(recipe);
+    await expect(repo.saveShoppingExclusions(['missing'])).rejects.toThrow('カテゴリ');
+  });
+  it('除外設定やカテゴリを変更しても買い物中・完了後の数量とチェックを変更しない', async () => {
+    const { item, trip } = await prepare(); await repo.toggleShopping(item.id);
+    await repo.setIngredientCategory(item.ingredientId, 'seasoning');
+    await repo.saveShoppingExclusions(['seasoning', 'vegetable']);
+    expect(await database.shoppingItems.get(item.id)).toMatchObject({ checked: true, quantity: 300 });
+    await expect(repo.generateShopping(week)).rejects.toThrow('再集計');
+    await repo.completeShopping(trip.id);
+    await repo.saveShoppingExclusions([]);
+    expect(await database.shoppingItems.get(item.id)).toMatchObject({ checked: true, quantity: 300 });
+    await expect(repo.setIngredientCategory(item.ingredientId, 'missing')).rejects.toThrow('カテゴリ');
+  });
   it('空のDBにはカテゴリと設定だけを作成する', async () => { expect(await database.categories.count()).toBe(6); expect(await database.recipes.count()).toBe(0); });
   it('失敗したレシピ保存では新しい食材もロールバックする', async () => {
     await expect(repo.saveRecipe({ ...input, ingredients: [{ name: '新食材', quantity: NaN, unit: 'g', categoryId: 'other' }] })).rejects.toThrow();
@@ -85,6 +114,30 @@ describe('保存と買い物トランザクション', () => {
   });
 });
 describe('バックアップの検証と復元', () => {
+  it('旧v1バックアップをv2へ移行し、食材・在庫・購入チェックを復元する', async () => {
+    const { item } = await prepare(); await repo.toggleShopping(item.id);
+    const backup = await createBackup(database);
+    const oldSettings = backup.data.settings.map(({ excludedShoppingCategoryIds: _excluded, ...settings }) => settings);
+    const legacy = { ...backup, schemaVersion: 1, data: { ...backup.data, settings: oldSettings } };
+    const migrated = parseBackup(JSON.stringify(legacy));
+    expect(migrated.schemaVersion).toBe(2);
+    expect(migrated.data.settings[0]?.excludedShoppingCategoryIds).toEqual(['seasoning']);
+    expect(migrated.data.shoppingItems).toEqual(backup.data.shoppingItems);
+    await restoreBackup(migrated, database);
+    expect(await database.shoppingItems.get(item.id)).toMatchObject({ checked: true, quantity: 300 });
+    await repo.saveShoppingExclusions([]);
+    const current = await createBackup(database);
+    await restoreBackup(parseBackup(JSON.stringify(current)), database);
+    expect((await database.settings.get('app'))?.excludedShoppingCategoryIds).toEqual([]);
+  });
+  it('除外カテゴリの重複・存在しない参照・v1への新フィールド混入を拒否する', async () => {
+    const backup = await createBackup(database);
+    const duplicate = structuredClone(backup); duplicate.data.settings[0]!.excludedShoppingCategoryIds = ['seasoning', 'seasoning'];
+    expect(() => validateBackup(duplicate)).toThrow();
+    const orphan = structuredClone(backup); orphan.data.settings[0]!.excludedShoppingCategoryIds = ['missing'];
+    expect(() => validateBackup(orphan)).toThrow('参照');
+    expect(() => validateBackup({ ...backup, schemaVersion: 1 })).toThrow();
+  });
   it('買い物チェックを含めて全データを往復する', async () => {
     const { item } = await prepare(); await repo.toggleShopping(item.id);
     const before = await database.snapshot(); const backup = await createBackup(database);

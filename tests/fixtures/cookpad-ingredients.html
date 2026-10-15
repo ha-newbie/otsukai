@@ -1,0 +1,30 @@
+<!doctype html>
+<!-- Synthetic fixture: structural selectors only, no copied recipe text. -->
+<html lang="ja"><head>
+  <meta charset="utf-8">
+  <link rel="canonical" href="https://cookpad.com/jp/recipes/999000001">
+  <title>材料欄の取込テスト</title>
+  <script>window.cookpadImportExecuted = true;</script>
+  <style>@import url("https://cookpad.example.test/style.css");</style>
+</head><body>
+  <img src="https://cookpad.example.test/photo.jpg" onerror="window.cookpadImportExecuted=true">
+  <iframe src="https://cookpad.example.test/frame"></iframe>
+  <article id="recipe">
+    <h1>取込テストの野菜煮</h1>
+    <section id="ingredients">
+      <h2>材料</h2>
+      <div id="serving_recipe_999000001"><span class="mise-icon-text">2人分</span></div>
+      <div class="ingredient-list"><ul>
+        <li id="ingredient_1"><span><a href="/jp/search/example">にんじん</a></span><bdi>２００ｇ</bdi></li>
+        <li class="headline">■合わせ調味料</li>
+        <li id="ingredient_2"><span>●（A）しょうゆ</span><bdi>大さじ1/2</bdi></li>
+        <li id="ingredient_3"><span>塩</span><bdi>少々</bdi></li>
+        <li id="ingredient_4"><span>ご飯</span><bdi>茶碗1杯</bdi></li>
+      </ul></div>
+    </section>
+    <section><h2>作り方</h2><p>手順にしか登場しない松茸は材料に追加しない。</p></section>
+    <div id="author_profile"><a href="/jp/users/999000001"><img alt="作者の写真"></a><a href="/jp/users/999000001">テスト作者</a></div>
+  </article>
+  <section id="similar_recipes_container"><h2>おすすめ</h2><ul><li id="ingredient_999"><span>おすすめ料理の牛肉</span><bdi>500g</bdi></li></ul></section>
+  <section><h2>コメント</h2><p>コメントだけのにんにくは抽出しない。</p></section>
+</body></html>

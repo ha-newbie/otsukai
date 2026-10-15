@@ -18,9 +18,19 @@ const backupSchema = z.object({
     settings: z.array(settingsSchema).length(1),
   }).strict(),
 }).strict();
+const legacyBackupSchema = backupSchema.extend({
+  schemaVersion: z.literal(1),
+  data: backupSchema.shape.data.extend({ settings: z.array(settingsSchema.omit({ excludedShoppingCategoryIds: true })).length(1) }).strict(),
+}).strict();
 export type Backup = z.infer<typeof backupSchema>;
 export function validateBackup(raw: unknown): Backup {
-  const backup = backupSchema.parse(raw);
+  let migrated = raw;
+  if (raw !== null && typeof raw === 'object' && 'schemaVersion' in raw && raw.schemaVersion === 1) {
+    const legacy = legacyBackupSchema.parse(raw);
+    const excludedShoppingCategoryIds = legacy.data.categories.some(value => value.id === 'seasoning') ? ['seasoning'] : [];
+    migrated = { ...legacy, schemaVersion: DATA_VERSION, data: { ...legacy.data, settings: legacy.data.settings.map(value => ({ ...value, excludedShoppingCategoryIds })) } };
+  }
+  const backup = backupSchema.parse(migrated);
   const { data } = backup;
   for (const rows of Object.values(data)) {
     const ids = rows.map(row => row.id);
@@ -33,6 +43,7 @@ export function validateBackup(raw: unknown): Backup {
   const recipes = new Set(data.recipes.map(value => value.id));
   const trips = new Map(data.trips.map(value => [value.id, value]));
   const validReference = (valid: boolean) => { if (!valid) throw new Error('参照先のないデータが含まれています'); };
+  data.settings.forEach(value => value.excludedShoppingCategoryIds.forEach(id => validReference(categories.has(id))));
   data.ingredients.forEach(value => validReference(categories.has(value.categoryId)));
   data.recipes.forEach(value => value.ingredients.forEach(item => validReference(ingredients.has(item.ingredientId))));
   data.meals.forEach(value => validReference(recipes.has(value.recipeId)));
@@ -58,7 +69,7 @@ export function parseBackup(text: string): Backup {
   let raw: unknown;
   try { raw = JSON.parse(text); } catch { throw new Error('JSONファイルを読み込めません'); }
   try { return validateBackup(raw); } catch (error) {
-    if (error instanceof z.ZodError) throw new Error('対応する形式のバックアップではありません。おつかいの形式バージョン1を選択してください');
+    if (error instanceof z.ZodError) throw new Error('対応する形式のバックアップではありません。おつかいの形式バージョン1または2を選択してください');
     throw error;
   }
 }

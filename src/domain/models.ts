@@ -1,6 +1,6 @@
 import { z } from 'zod';
 
-export const DATA_VERSION = 1;
+export const DATA_VERSION = 2;
 export const idSchema = z.string().min(1).max(100);
 export const nameSchema = z.string().trim().min(1).max(100);
 export const quantitySchema = z.number().finite().min(0).max(1_000_000);
@@ -48,6 +48,7 @@ export const shoppingItemSchema = z.object({
 export const settingsSchema = z.object({
   id: z.literal('app'), defaultServings: servingsSchema,
   lastBackupAt: z.union([timestampSchema, z.literal('')]), backupReminderDays: z.number().int().min(1).max(365),
+  excludedShoppingCategoryIds: z.array(idSchema).max(100).refine(ids => new Set(ids).size === ids.length, '除外カテゴリが重複しています'),
 }).strict();
 
 export type StoreCategory = z.infer<typeof categorySchema>;
@@ -65,7 +66,7 @@ export interface AppData {
   meals: PlannedMeal[]; days: DaySetting[]; pantry: PantryStock[];
   trips: ShoppingTrip[]; shoppingItems: ShoppingItem[]; settings: Settings[];
 }
-export const defaultSettings: Settings = { id: 'app', defaultServings: 2, lastBackupAt: '', backupReminderDays: 7 };
+export const defaultSettings: Settings = { id: 'app', defaultServings: 2, lastBackupAt: '', backupReminderDays: 7, excludedShoppingCategoryIds: ['seasoning'] };
 export const defaultCategories: StoreCategory[] = [
   { id: 'vegetable', name: '野菜・果物', order: 0 },
   { id: 'meat', name: '肉・魚', order: 1 },

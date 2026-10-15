@@ -21,15 +21,17 @@ export function ShoppingPage({ data, week, setWeek, action }: { data: AppData; w
   const complete = trip?.status === 'completed';
   const canGenerate = (!trip || trip.status === 'draft') && (!openTrip || openTrip.id === trip?.id) && addDays(week, 6) >= localDate();
   const ingredient = (id: string) => data.ingredients.find(value => value.id === id);
+  const excludedCategories = data.categories.filter(category => data.settings[0]?.excludedShoppingCategoryIds.includes(category.id));
   return <>
     <div className="page-heading"><div><p className="eyebrow">必要なものだけ、忘れずに。</p><h1>買い物リスト</h1><p className="subtle">タップして購入チェック。途中で閉じても保存されます。</p></div><button className="button primary" disabled={complete || (!!openTrip && openTrip.id !== trip?.id) || addDays(week, 6) < localDate()} onClick={() => setAdding(true)}><Icon name="plus" size={18} />品目を追加</button></div>
     <div className="section-toolbar"><h2>{complete ? '買い物完了' : trip?.status === 'active' ? '買い物中' : '今週の買い物'}</h2><WeekPicker week={week} setWeek={setWeek} /></div>
+    {!!excludedCategories.length && <p className="help-text">献立からの集計対象外：{excludedCategories.map(category => category.name).join('・')}。設定で変更できます。買い足す場合は「品目を追加」を使います。作成済みリストへは開始前の再集計で反映します。</p>}
     {openTrip && openTrip.startsOn !== week && <div className="banner"><span>{dateLabel(openTrip.startsOn)}からのリストが進行中です。</span><button className="text-button" onClick={() => setWeek(openTrip.startsOn)}>リストを開く</button></div>}
     {!trip ? <Empty icon="basket" title="献立から、買い物へ。" action={canGenerate ? <button className="button primary" onClick={() => void action(() => repository.generateShopping(week), '買い物リストを作成しました')}>献立からリストを作成</button> : undefined}>食材をまとめて、在庫分を差し引きます。<br />買いたいものを直接追加することもできます。</Empty> : <>
       <div className="shopping-progress"><div><strong>{checked}<span> / {toBuy.length}</span></strong><p>{complete ? '購入した品目' : '購入チェック済み'}</p></div><div className="progress-track" role="progressbar" aria-label="購入進捗" aria-valuenow={checked} aria-valuemin={0} aria-valuemax={Math.max(1, toBuy.length)}><span style={{ width: `${toBuy.length ? checked / toBuy.length * 100 : 0}%` }} /></div><Icon name={complete ? 'check' : 'basket'} size={34} /></div>
       <div className="shopping-toolbar"><label className="checkbox-label"><input type="checkbox" checked={hideChecked} onChange={event => setHideChecked(event.target.checked)} />チェック済みを隠す</label>{canGenerate && <button className="text-button" onClick={() => void action(() => repository.generateShopping(week), '手動品目・数量調整を残して再集計しました')}>献立から再集計</button>}</div>
       {trip.status === 'active' && <p className="help-text">買い物開始時のリストを保持しています。献立の変更は自動反映しません。</p>}
-      {!toBuy.length && <div className="all-stocked"><Icon name="check" /><div><strong>在庫で足りています</strong><p>必要なら、買いたいものを追加してください。</p></div></div>}
+      {!toBuy.length && <div className="all-stocked"><Icon name="check" /><div><strong>集計対象の食材は購入不要です</strong><p>除外した調味料などを買う場合は、品目を追加してください。</p></div></div>}
       {data.categories.map(category => {
         const categoryItems = items.filter(item => ingredient(item.ingredientId)?.categoryId === category.id && (!hideChecked || !item.checked));
         if (!categoryItems.length) return null;
