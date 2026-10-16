@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 import { addDays, dateLabel, localDate, monday } from '../src/domain/dates';
 import { defaultCategories } from '../src/domain/models';
+import { decodePageHandoff, encodePageHandoff } from '../src/services/import-handoff';
 const appPath = process.env.BASE_PATH ?? '/';
 
 async function tab(page: Page, name: string) { await page.getByRole('navigation').getByRole('button', { name, exact: true }).click(); }
@@ -396,7 +397,7 @@ test('指定Cookpad URLのCORS読取不可をコードで示し、実行手順�
   await dialog.getByRole('button', { name: 'Safariでの取込手順を開く' }).click();
   await expect(dialog.getByRole('link', { name: '元ページを開く ↗' })).toHaveAttribute('href', url);
   await dialog.getByText('初回だけ：ショートカットの作り方', { exact: true }).click();
-  await expect(dialog.getByLabel('Safariショートカット用コード')).toHaveValue(/completion\(JSON.stringify/);
+  await expect(dialog.getByLabel('Safariショートカット用コード')).toHaveValue(/completion\(link\)/);
 });
 
 test('配布するSafari用コードを元ページで実行し、結果をPWAで検証・確認・保存する', async ({ page, context }) => {
@@ -407,6 +408,7 @@ test('配布するSafari用コードを元ページで実行し、結果をPWA�
   await dialog.getByLabel('元レシピのURL').fill(url);
   await dialog.getByRole('button', { name: 'Safariでの取込手順を開く' }).click();
   await dialog.getByText('初回だけ：ショートカットの作り方', { exact: true }).click();
+  await dialog.getByRole('radio', { name: 'ホーム画面版へコピー' }).check();
   const script = await dialog.getByLabel('Safariショートカット用コード').inputValue();
   const source = await context.newPage();
   await source.route('**/*', route => route.request().url() === url ? route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }) : route.abort());
@@ -476,4 +478,131 @@ test('端末DBを開けない場合にも読込段階のエラーコードを表
   await page.goto(appPath);
   await expect(page.getByRole('alert')).toContainText('DATA-2002');
   await expect(page.getByRole('button', { name: '再読み込み', exact: true })).toBeVisible();
+});
+
+test('共有用の本番コードが生成したリンクからオフラインでも自動解析し、確認後だけ保存する', async ({ page, context }) => {
+  const url = 'https://cookpad.com/jp/recipes/999000001';
+  await page.goto(appPath);
+  const appUrl = page.url();
+  await expect.poll(() => page.evaluate(() => Boolean(navigator.serviceWorker.controller)), { timeout: 20000 }).toBe(true);
+  const dialog = await openImport(page);
+  await dialog.getByLabel('元レシピのURL').fill(url);
+  await dialog.getByRole('button', { name: 'Safariでの取込手順を開く' }).click();
+  await dialog.getByText('初回だけ：ショートカットの作り方', { exact: true }).click();
+  const script = await dialog.getByLabel('Safariショートカット用コード').inputValue();
+  const source = await context.newPage();
+  const html = await readFile('tests/fixtures/cookpad-ingredients.html', 'utf-8');
+  await source.route('**/*', route => route.request().url() === url ? route.fulfill({ status: 200, contentType: 'text/html; charset=utf-8', body: html }) : route.abort());
+  await source.goto(url); await source.waitForLoadState('networkidle');
+  let sourceRequests = 0;
+  source.on('request', () => sourceRequests++);
+  const result = await source.evaluate(code => {
+    let output = ''; let completions = 0;
+    (window as Window & { completion?: (value: string) => void }).completion = value => { output = value; completions++; };
+    const before = document.documentElement.outerHTML;
+    new Function(code)();
+    return { output, completions, unchanged: before === document.documentElement.outerHTML };
+  }, script);
+  expect(result.completions).toBe(1); expect(result.unchanged).toBe(true); expect(sourceRequests).toBe(0);
+  expect(JSON.parse(decodePageHandoff(result.output, appUrl)).recipe.recipeIngredient).toHaveLength(4);
+  const tooLong = await source.evaluate(code => {
+    document.querySelector('#ingredient_1 > span')!.textContent = '長い材料名'.repeat(1500);
+    let output = '';
+    (window as Window & { completion?: (value: string) => void }).completion = value => { output = value; };
+    new Function(code)(); return output;
+  }, script);
+  expect(JSON.parse(decodePageHandoff(tooLong, appUrl)).error.code).toBe('IMP-4007');
+  await source.close();
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+  // Model a new browser navigation from Shortcuts. An open form deliberately queues a hash-only handoff.
+  await page.goto('about:blank');
+  const requests: string[] = [];
+  page.on('request', request => requests.push(request.url()));
+  await context.setOffline(true);
+  await page.goto(result.output);
+  await expect(page).toHaveURL(appUrl);
+  await expect(dialog.getByLabel('料理名', { exact: true })).toHaveValue('取込テストの野菜煮');
+  await expect(dialog.getByLabel('材料2のカテゴリ')).toHaveValue('seasoning');
+  await expect(dialog).toContainText('ホーム画面のおつかい');
+  expect(await dialog.evaluate(element => element.scrollWidth <= element.clientWidth)).toBe(true);
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'あなたの定番を、ここに。' })).toBeVisible();
+  await page.goto(result.output);
+  await expect(dialog.getByLabel('元レシピのURL')).toHaveValue(url);
+  await expect(dialog.getByLabel('作り方')).toHaveValue('');
+  await dialog.getByRole('button', { name: 'この内容で保存する' }).click();
+  await expect(dialog).not.toBeVisible();
+  await page.reload(); await tab(page, 'レシピ');
+  await expect(page.getByRole('heading', { name: '取込テストの野菜煮', exact: true })).toBeVisible();
+  await expect(dialog).not.toBeVisible();
+  expect(requests.every(value => !value.includes('otsukai-import') && !value.includes('cookpad.com'))).toBe(true);
+  await context.setOffline(false);
+});
+
+const sharedRecipe = { kind: 'otsukai-recipe-page', version: 1, recipe: { '@type': 'Recipe', name: '共有からのスープ', url: 'https://cookpad.com/jp/recipes/999000002', recipeYield: '2人分', recipeIngredient: [{ '@type': 'PropertyValue', name: 'にんじん', value: '200g' }], publisher: { name: 'クックパッド' } } };
+for (const format of ['link', 'json'] as const) test(`ホーム画面版の受取入口は${format}を1操作で解析し、起動時はクリップボードを読まない`, async ({ page, baseURL }) => {
+  const payload = JSON.stringify(sharedRecipe);
+  const input = format === 'link' ? encodePageHandoff(payload, new URL(appPath, baseURL).href) : payload;
+  await page.addInitScript(value => {
+    const state = window as Window & { clipboardReads?: number };
+    state.clipboardReads = 0;
+    Object.defineProperty(navigator, 'clipboard', { value: { readText: async () => { state.clipboardReads = (state.clipboardReads ?? 0) + 1; return value; } } });
+  }, input);
+  await page.goto(appPath); await tab(page, 'レシピ');
+  expect(await page.evaluate(() => (window as Window & { clipboardReads?: number }).clipboardReads)).toBe(0);
+  await page.getByRole('button', { name: '共有した材料を取り込む', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByLabel('料理名', { exact: true })).toHaveValue('共有からのスープ');
+  expect(await page.evaluate(() => (window as Window & { clipboardReads?: number }).clipboardReads)).toBe(1);
+  await dialog.getByRole('button', { name: 'この内容で保存する' }).click();
+  await page.reload(); await tab(page, 'レシピ');
+  await expect(page.getByRole('heading', { name: '共有からのスープ', exact: true })).toBeVisible();
+  expect(await page.evaluate(() => (window as Window & { clipboardReads?: number }).clipboardReads)).toBe(0);
+});
+
+test('不正な受渡しをコードで拒否してURLから消し、既存レシピを保護する', async ({ page }) => {
+  await page.goto(appPath); const appUrl = page.url();
+  await recipe(page, '既存の料理');
+  await page.goto(appUrl + '#otsukai-import=broken');
+  await expect(page.getByRole('alert')).toContainText('IMP-4006');
+  await expect(page).toHaveURL(appUrl);
+  await tab(page, 'レシピ');
+  await expect(page.getByRole('heading', { name: '既存の料理', exact: true })).toBeVisible();
+  const invalid = { ...sharedRecipe, recipe: { ...sharedRecipe.recipe, url: 'https://cookpad.com.evil.test/jp/recipes/999000002' } };
+  await page.goto(encodePageHandoff(JSON.stringify(invalid), appUrl));
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.getByRole('alert')).toContainText('IMP-4002');
+  await expect(dialog.getByRole('button', { name: 'この内容で保存する' })).toHaveCount(0);
+  await expect(page).toHaveURL(appUrl);
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+  await expect(page.getByRole('heading', { name: '既存の料理', exact: true })).toBeVisible();
+});
+
+test('編集中に別の共有リンクが届いても入力を上書きしない', async ({ page }) => {
+  await page.goto(appPath); const appUrl = page.url();
+  await tab(page, 'レシピ');
+  await page.getByRole('button', { name: 'レシピを追加', exact: true }).click();
+  const dialog = page.getByRole('dialog');
+  await dialog.getByLabel('料理名').fill('まだ保存していない料理');
+  await page.evaluate(link => { location.hash = new URL(link).hash; }, encodePageHandoff(JSON.stringify(sharedRecipe), appUrl));
+  await expect(page).toHaveURL(appUrl);
+  await expect(dialog.getByLabel('料理名')).toHaveValue('まだ保存していない料理');
+  await expect(dialog.getByRole('status')).toContainText('共有した材料を受け取りました');
+  await dialog.getByRole('button', { name: '閉じる', exact: true }).click();
+  await page.getByRole('button', { name: '受け取った材料を確認' }).click();
+  await expect(dialog.getByLabel('料理名')).toHaveValue('共有からのスープ');
+});
+
+test('クリップボードAPIがなくても手動の貼付操作で材料を自動解析する', async ({ page }) => {
+  await page.addInitScript(() => Object.defineProperty(navigator, 'clipboard', { value: undefined }));
+  await page.goto(appPath);
+  const dialog = await openImport(page);
+  await dialog.getByRole('button', { name: 'ページ取込', exact: true }).click();
+  await dialog.getByRole('button', { name: '共有した材料を取り込む' }).click();
+  await expect(dialog.getByRole('alert')).toContainText('IMP-4003');
+  await dialog.getByLabel('ページで取得したデータ').evaluate((element, input) => {
+    const data = new DataTransfer(); data.setData('text/plain', input);
+    element.dispatchEvent(new ClipboardEvent('paste', { clipboardData: data, bubbles: true, cancelable: true }));
+  }, JSON.stringify(sharedRecipe));
+  await expect(dialog.getByLabel('料理名')).toHaveValue('共有からのスープ');
 });

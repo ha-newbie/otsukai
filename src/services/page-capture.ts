@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { AppError } from '../domain/errors';
 import { MAX_AI_RESPONSE_BYTES, parseStructuredRecipes, type ImportContext, type ImportedRecipe } from '../domain/recipe-import';
 import { cookpadRecipeUrl } from './cookpad-import';
+import { encodePageHandoff, MAX_HANDOFF_URL_LENGTH, sharedCaptureText } from './import-handoff';
 
 /** Self-contained: this exact function runs on the user's open Safari page. No network or cookies. */
 function captureOpenCookpadPage() {
@@ -31,11 +32,14 @@ function captureOpenCookpadPage() {
 }
 
 /** Apple Shortcuts must receive a Safari webpage and call completion exactly once. */
-export function safariCaptureScript(): string {
-  return `// おつかい: 開いているクックパッドの材料だけを取得。通信・Cookie読取・ページ変更は行いません。\nif (typeof completion !== 'function') { throw new Error('[IMP-4001] Safariの共有メニューからショートカットを実行してください'); }\ncompletion(JSON.stringify((${captureOpenCookpadPage.toString()})()));`;
+export function safariCaptureScript(appUrl?: string): string {
+  const preamble = `// おつかい: 開いているクックパッドの材料だけを取得。通信・Cookie読取・ページ変更は行いません。\nif (typeof completion !== 'function') { throw new Error('[IMP-4001] Safariの共有メニューからショートカットを実行してください'); }\n`;
+  if (!appUrl) return `${preamble}completion(JSON.stringify((${captureOpenCookpadPage.toString()})()));`;
+  // No fetch, navigation or clipboard access in the page. Shortcuts explicitly opens the returned URL.
+  return `${preamble}const encode = ${encodePageHandoff.toString()};\nlet result = (${captureOpenCookpadPage.toString()})();\nlet link;\ntry { link = encode(JSON.stringify(result), ${JSON.stringify(appUrl)}, ${MAX_HANDOFF_URL_LENGTH}); }\ncatch { link = encode(JSON.stringify({ kind: 'otsukai-recipe-page', version: 1, error: { code: 'IMP-4007' } }), ${JSON.stringify(appUrl)}, ${MAX_HANDOFF_URL_LENGTH}); }\ncompletion(link);`;
 }
 
-const pageErrorCodes = ['IMP-1004', 'IMP-3002', 'IMP-3003', 'IMP-3004', 'IMP-3006', 'IMP-4001', 'IMP-4005'] as const;
+const pageErrorCodes = ['IMP-1004', 'IMP-3002', 'IMP-3003', 'IMP-3004', 'IMP-3006', 'IMP-4001', 'IMP-4005', 'IMP-4007'] as const;
 const captureSchema = z.discriminatedUnion('status', [
   z.object({ status: z.literal('success'), recipe: z.object({ '@type': z.literal('Recipe'), url: z.string() }).passthrough() }).strict(),
   z.object({ status: z.literal('error'), error: z.object({ code: z.enum(pageErrorCodes) }).strict() }).strict(),
@@ -59,4 +63,12 @@ export function parsePageCapture(input: string, context: ImportContext = {}): Im
 export async function copyImportText(text: string): Promise<void> {
   if (!navigator.clipboard?.writeText) throw new AppError('IMP-4003');
   try { await navigator.clipboard.writeText(text); } catch { throw new AppError('IMP-4004'); }
+}
+
+/** Read only in a click/paste gesture; never poll the clipboard on launch or focus. */
+export async function readSharedCapture(appUrl: string): Promise<string> {
+  if (!navigator.clipboard?.readText) throw new AppError('IMP-4003');
+  let input: string;
+  try { input = await navigator.clipboard.readText(); } catch { throw new AppError('IMP-4004'); }
+  return sharedCaptureText(input, appUrl);
 }

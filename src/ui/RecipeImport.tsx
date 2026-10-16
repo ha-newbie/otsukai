@@ -7,31 +7,43 @@ import { recipePrompt } from '../services/ai';
 import { fetchRecipeResponse } from '../services/recipe-import';
 import type { ErrorContext } from '../domain/errors';
 import { cookpadRecipeUrl, parseRecipeDocument } from '../services/cookpad-import';
-import { copyImportText } from '../services/page-capture';
+import { copyImportText, parsePageCapture } from '../services/page-capture';
+import { describeError, type ErrorReport } from '../services/diagnostics';
 import { AppError } from '../domain/errors';
 import { PageCaptureHelp } from './PageCaptureHelp';
 import { normalizeName } from '../domain/models';
 import { Modal, type Action } from './components';
 import { RecipeFields } from './RecipeFields';
+import { ErrorBanner } from './ErrorBanner';
 
 type Method = 'url' | 'page' | 'ai' | 'structured';
-export function RecipeImport({ data, action, onClose }: { data: AppData; action: Action; onClose: () => void }) {
-  const [method, setMethod] = useState<Method>('url');
-  const [sourceUrl, setSourceUrl] = useState('');
-  const [source, setSource] = useState('');
+function withCurrentCategories(values: ImportedRecipe[], data: AppData): ImportedRecipe[] {
+  const current = new Map(data.ingredients.map(value => [value.normalizedName, value.categoryId]));
+  return values.map(value => ({ ...value, recipe: { ...value.recipe, ingredients: value.recipe.ingredients.map(item => ({ ...item, categoryId: current.get(normalizeName(item.name)) ?? item.categoryId })) } }));
+}
+export function RecipeImport({ data, action, onClose, initialPageCapture, receivedViaLink = false }: { data: AppData; action: Action; onClose: () => void; initialPageCapture?: string; receivedViaLink?: boolean }) {
+  const [initial] = useState<{ values: ImportedRecipe[]; failure: ErrorReport | null }>(() => {
+    if (!initialPageCapture) return { values: [], failure: null };
+    try { return { values: withCurrentCategories(parsePageCapture(initialPageCapture, { defaultServings: data.settings[0]?.defaultServings ?? 2 }), data), failure: null }; }
+    catch (cause) { return { values: [], failure: describeError(cause) }; }
+  });
+  const [initialFailure, setInitialFailure] = useState(initial.failure);
+  const [method, setMethod] = useState<Method>(initialPageCapture ? 'page' : 'url');
+  const [sourceUrl, setSourceUrl] = useState(initial.values[0]?.recipe.sourceUrl ?? '');
+  const [source, setSource] = useState(initial.values[0]?.recipe.source ?? '');
   const [text, setText] = useState('');
   const [json, setJSON] = useState('');
   const [structured, setStructured] = useState('');
   const [ingredientsOnly, setIngredientsOnly] = useState(true);
-  const [candidates, setCandidates] = useState<ImportedRecipe[]>([]);
+  const [candidates, setCandidates] = useState<ImportedRecipe[]>(initial.values);
   const [selected, setSelected] = useState(0);
-  const [draft, setDraft] = useState<RecipeInput | null>(null);
+  const [draft, setDraft] = useState<RecipeInput | null>(initial.values[0]?.recipe ?? null);
   const fileInput = useRef<HTMLInputElement>(null);
   const context = { sourceUrl, source, defaultServings: data.settings[0]?.defaultServings ?? 2, ingredientsOnly };
   const cookpadUrl = cookpadRecipeUrl(sourceUrl);
   const showCandidates = (values: ImportedRecipe[]) => {
-    const currentCategories = new Map(data.ingredients.map(value => [value.normalizedName, value.categoryId]));
-    const adjusted = values.map(value => ({ ...value, recipe: { ...value.recipe, ingredients: value.recipe.ingredients.map(item => ({ ...item, categoryId: currentCategories.get(normalizeName(item.name)) ?? item.categoryId })) } }));
+    const adjusted = withCurrentCategories(values, data);
+    setInitialFailure(null);
     setCandidates(adjusted); setSelected(0); setDraft(adjusted[0]?.recipe ?? null);
   };
   const loadStructured = (input: string, phase = 'HTML・JSON解析', observed: ErrorContext = {}) => {
@@ -53,8 +65,11 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
     }, 'レシピを取り込みました')) onClose();
   };
   const chosen = candidates[selected];
+  const standalone = window.matchMedia('(display-mode: standalone)').matches || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
   return <Modal title="レシピを取り込む" onClose={onClose}>
+    {initialFailure && <ErrorBanner report={initialFailure} onDismiss={() => setInitialFailure(null)} />}
     {draft ? <>
+      {receivedViaLink && !standalone && <div className="import-notice"><strong>ブラウザで材料を受け取りました</strong><p>ホーム画面のおつかいを使っている場合は、そちらへ戻り「レシピ」→「共有した材料を取り込む」を押してください。ここで保存すると、このブラウザに保存されます。</p><button className="text-button" onClick={() => void action(() => copyImportText(initialPageCapture!), 'ホーム画面版で受け取れる材料をコピーしました')}>ホーム画面版用に材料をコピー</button></div>}
       <button className="text-button" onClick={() => { setDraft(null); setCandidates([]); }}>← 入力に戻る</button>
       {candidates.length > 1 && <label>取り込むレシピ<select value={selected} onChange={event => {
         const index = Number(event.target.value); setSelected(index); setDraft(candidates[index]!.recipe);
@@ -74,7 +89,7 @@ export function RecipeImport({ data, action, onClose }: { data: AppData; action:
         <button aria-pressed={method === 'url'} onClick={() => setMethod('url')}>URL</button><button aria-pressed={method === 'page'} onClick={() => setMethod('page')}>ページ取込</button><button aria-pressed={method === 'ai'} onClick={() => setMethod('ai')}>本文・AI</button><button aria-pressed={method === 'structured'} onClick={() => setMethod('structured')}>HTML・JSON</button>
       </div>
       {method === 'url' && <section>
-        <h3>URLから読み込む</h3>{cookpadUrl ? <div className="import-notice"><p><strong>クックパッドはページ取込を使ってください</strong></p><p>元サイトはPWAからの直接読取を許可していません。Safariで開いたページから材料を受け取れます。URL入力だけの自動取得には対応していません。</p><button className="button primary full" onClick={() => setMethod('page')}>Safariでの取込手順を開く</button></div> : <p className="help-text">この端末のブラウザから直接取得します。別サイトからの読取（CORS）を許可しているページに対応しています。取得できない場合は「ページ取込」「HTML・JSON」「本文・AI」を使います。</p>}
+        <h3>URLから読み込む</h3>{cookpadUrl ? <div className="import-notice"><p><strong>クックパッドはSafariの共有から自動取込できます</strong></p><p>元サイトはPWAからの直接読取を許可していません。共有操作で材料を抽出し、確認画面へ渡します。URL入力だけの自動取得には対応していません。</p><button className="button primary full" onClick={() => setMethod('page')}>Safariでの取込手順を開く</button></div> : <p className="help-text">この端末のブラウザから直接取得します。別サイトからの読取（CORS）を許可しているページに対応しています。取得できない場合は「ページ取込」「HTML・JSON」「本文・AI」を使います。</p>}
         <button className={`button ${cookpadUrl ? 'secondary' : 'primary'} full`} disabled={!sourceUrl.trim()} onClick={() => void action(async () => {
           const response = await fetchRecipeResponse(sourceUrl);
           loadStructured(response.content, 'URL応答のレシピ解析', { url: response.url, httpStatus: response.httpStatus, contentType: response.contentType });

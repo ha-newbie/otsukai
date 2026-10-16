@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { copyImportText, parsePageCapture, safariCaptureScript } from './page-capture';
+import { copyImportText, parsePageCapture, readSharedCapture, safariCaptureScript } from './page-capture';
+import { encodePageHandoff } from './import-handoff';
 
 afterEach(() => vi.unstubAllGlobals());
 const capture = { kind: 'otsukai-recipe-page', version: 1, recipe: { '@type': 'Recipe', name: '材料取込テスト', url: 'https://cookpad.com/jp/recipes/999000001', recipeYield: '2人分', recipeIngredient: [{ '@type': 'PropertyValue', name: 'しょうゆ', value: '大さじ1' }], publisher: { name: 'クックパッド' } } };
@@ -23,4 +24,18 @@ it('コピー未対応と権限拒否を区別する', async () => {
   await expect(copyImportText('script')).rejects.toMatchObject({ code: 'IMP-4003' });
   vi.stubGlobal('navigator', { clipboard: { writeText: async () => { throw new DOMException('denied', 'NotAllowedError'); } } });
   await expect(copyImportText('script')).rejects.toMatchObject({ code: 'IMP-4004' });
+});
+it('共有リンクと従来JSONを受け取り、読取拒否とリンク破損を区別する', async () => {
+  const app = 'https://ha-newbie.github.io/otsukai/';
+  const input = JSON.stringify(capture);
+  for (const value of [input, encodePageHandoff(input, app)]) {
+    vi.stubGlobal('navigator', { clipboard: { readText: async () => value } });
+    expect(await readSharedCapture(app)).toBe(input);
+  }
+  vi.stubGlobal('navigator', { clipboard: { readText: async () => { throw new DOMException('denied', 'NotAllowedError'); } } });
+  await expect(readSharedCapture(app)).rejects.toMatchObject({ code: 'IMP-4004' });
+  vi.stubGlobal('navigator', { clipboard: { readText: async () => app + '#otsukai-import=bad' } });
+  await expect(readSharedCapture(app)).rejects.toMatchObject({ code: 'IMP-4006' });
+  vi.stubGlobal('navigator', {});
+  await expect(readSharedCapture(app)).rejects.toMatchObject({ code: 'IMP-4003' });
 });

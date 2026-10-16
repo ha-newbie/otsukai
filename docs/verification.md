@@ -174,3 +174,36 @@ URL直接取得では通常のCORS対応転送を許可するよう修正した�
 - 変更: `src/domain/ingredient-category.ts`, `src/domain/ingredient-category.test.ts`, `src/domain/recipe-import.ts`, `src/domain/recipe-import.test.ts`, `src/services/cookpad-import.ts`, `src/services/recipe-import.ts`, `src/services/recipe-import.test.ts`, `src/ui/App.tsx`, `src/ui/RecipeImport.tsx`, `src/ui/SettingsPage.tsx`, `src/ui/components.tsx`, `src/ui/styles.css`, `tests/app.spec.ts`, `tests/pages-server.mjs`, `vite.config.ts`, `AGENTS.md`, `README.md`, `docs/ai-import.md`, `docs/architecture.md`, `docs/backlog.md`, `docs/cookpad-import.md`, `docs/roadmap.md`, `docs/verification.md`。
 
 実機iOSのショートカット作成・Safari共有・実行許可・クリップボード・ホーム画面アプリとの切替は未確認。Chromium上のJavaScript実行と保存の成功で、これらの実機操作まで保証しない。次の確認はiPhone上で初回設定から材料貼付までを通し、診断のビルドIDとエラーコードを記録すること。詳細手順と全コードは[import-errors.md](import-errors.md)を参照。
+
+## Safari共有からの自動取込（2026-10-15）
+
+ユーザーの追加指示により、無料・サーバー不要・CORSを回避しない条件で、共有後の受渡しと解析を自動化した。Safariで表示中のページに対してショートカットを実行すると、材料を抽出しておつかいの受取リンクを返す。ショートカットの「URLを開く」で確認画面まで進む。ホーム画面版は、明示した受取ボタンでコピー済みリンク/旧JSONの読取・解析を続けて行う。初回設定、OSの貼付許可、保存先の違いは[automatic-import.md](automatic-import.md)へ記録した。
+
+| 検証 | 結果 |
+| --- | --- |
+| `npm run typecheck` | 成功 |
+| `npm test` | 10ファイル・98件成功 |
+| `BASE_PATH=/otsukai/ npm run build` | 成功。PWAとPages設定を維持 |
+| `BASE_PATH=/otsukai/ PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH=/usr/bin/chromium npm run test:e2e` | 24件成功 |
+| `git diff --check` | 成功 |
+
+追加した確認内容:
+
+- UTF-8/日本語のfragment受渡し、origin/path一致、query/認証情報/別アプリ/未知版/壊れたUTF-8/サイズ超過の拒否。
+- 解析前のfragment除去とhistory stateの保持。通常のアプリURL・既存hashを変更しないこと。
+- 本番配布コードの実行→受取リンク→オフラインでの自動確認画面表示。元ページの変更・追加通信は0件、`completion`は1回。受取リンクの材料はHTTP要求へ送られず、元サイトへの再取得もない。
+- キャンセルで未保存、確認後の保存、再読込で保存結果が残ることと、受取画面が再出現しないこと。
+- 元ページのデータがリンク上限を超えた場合に、生成コードが`IMP-4007`を返すこと。
+- リンクと従来JSONの両方を受取ボタンから解析。起動時・再読込時にはクリップボードを読まない。未対応時は`IMP-4003`を表示し、手動pasteイベントから自動解析できること。
+- 不正な受渡しで既存レシピを変更しないこと。編集中に届いた材料は確認待ちにし、入力と受信通知が同じダイアログで見えること。
+
+初回の追加E2Eでは、既存の取込フォームを開いたまま同一URLのhashだけを変えたため、意図した入力保護が働いて確認待ちになった。自動起動の検証は新しいナビゲーションへ修正し、開いているフォームの保護は独立したテストで確認した。
+
+指定レシピ`18472521`の保存済み実HTMLでも、本番の生成コード→受取リンク→自動確認画面→保存→再読込を追加検証した。材料11件、調味料候補6件、手順なし、元URL保持を確認。受取リンクは1,489文字で、抽出中の追加通信/ページ変更は0件、`completion`は1回だった。これは実HTMLを使ったブラウザ検証であり、iOS実機の共有操作ではない。実HTMLはリポジトリへ含めていない。
+
+変更ファイル:
+
+- 追加: `src/services/import-handoff.ts`, `src/services/import-handoff.test.ts`, `docs/automatic-import.md`。
+- 変更: `src/domain/errors.ts`, `src/main.tsx`, `src/services/page-capture.ts`, `src/services/page-capture.test.ts`, `src/ui/App.tsx`, `src/ui/RecipeImport.tsx`, `src/ui/RecipesPage.tsx`, `src/ui/PageCaptureHelp.tsx`, `src/ui/components.tsx`, `tests/app.spec.ts`, `AGENTS.md`, `README.md`, `docs/architecture.md`, `docs/backlog.md`, `docs/cookpad-import.md`, `docs/import-errors.md`, `docs/roadmap.md`, `docs/verification.md`。
+
+DB/バックアップv2・買い物スナップショット・依存関係は変更なし。URL入力だけの直接取得、iOSホーム画面版への自動起動/無操作での貼付は実装していない。初回ショートカット設定、実際のSafari共有と実行許可、URLを開く際の遷移、クリップボード許可はiOS実機で未確認。次の作業は実機での一連の操作確認。
