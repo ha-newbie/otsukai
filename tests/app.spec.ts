@@ -555,6 +555,9 @@ for (const format of ['link', 'json'] as const) test(`ホーム画面版の受�
   await expect(dialog.getByLabel('料理名', { exact: true })).toHaveValue('共有からのスープ');
   expect(await page.evaluate(() => (window as Window & { clipboardReads?: number }).clipboardReads)).toBe(1);
   await dialog.getByRole('button', { name: 'この内容で保存する' }).click();
+  // The click dispatches an asynchronous IndexedDB transaction; wait for its committed UI result.
+  await expect(page.getByRole('status')).toContainText('レシピを取り込みました');
+  await expect(dialog).not.toBeVisible();
   await page.reload(); await tab(page, 'レシピ');
   await expect(page.getByRole('heading', { name: '共有からのスープ', exact: true })).toBeVisible();
   expect(await page.evaluate(() => (window as Window & { clipboardReads?: number }).clipboardReads)).toBe(0);
